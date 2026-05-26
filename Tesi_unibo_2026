@@ -1,3 +1,78 @@
+### ricchezza di specie (Species Richness) per ciascun transetto
+
+# 1. Installa e carica il pacchetto dplyr per la manipolazione dei dati
+# install.packages("dplyr")
+library(dplyr)
+
+# 2. Calcola la ricchezza di specie e i contatti totali per transetto
+setwd("C:/Runibo")
+coppie2025 <- read_excel("C:/Runibo/dati_coppie_2025.xlsx")
+tabella_ricchezza <- coppie2025 %>%
+  # Filtra eliminando le righe dove la specie non è stata contattata
+  filter(Coppie > 0) %>%
+  # Raggruppa i dati per transetto
+  group_by(Transetto) %>%
+  # Calcola le metriche
+  summarise(
+    Ricchezza_Specie = n_distinct(Specie), # Conta le specie uniche presenti
+    Contatti_Totali = sum(Coppie)        # Somma tutti gli uccelli visti
+  )
+
+# 3. Mostra la tabella dei risultati
+print(tabella_ricchezza)
+
+# A tibble: 3 × 3
+# Transetto Ricchezza_Specie Contatti_Totali
+# <chr>                <int>           <dbl>
+# 1 T1                      40            430.
+# 2 T2                      39            406 
+# 3 T3                      33            376.
+
+#### indice di biodiversità di Shannon-Wiener (\(H^{\prime }\))
+
+# 1. Installa e carica il pacchetto vegan per l'ecologia dei dati
+# install.packages("vegan")
+# install.packages("tidyr")
+library(vegan)
+library(dplyr)
+library(tidyr)
+
+# 2. Trasforma i dati nel formato richiesto da vegan (matrice sito x specie)
+ matrice_comunita <- coppie2025 %>%
+  # Seleziona solo le colonne necessarie
+  select(Transetto, Specie, Coppie) %>%
+  # Ruota la tabella mettendo le specie come colonne e i transetti come righe
+  tidyr::pivot_wider(names_from = Specie, values_from = Coppie, values_fill = 0) %>%
+  # Imposta il nome del transetto come indice della riga
+  tibble::column_to_rownames(var = "Transetto")
+
+# 3. Calcola l'indice di Shannon-Wiener (base del logaritmo naturale)
+shannon_transetti <- diversity(matrice_comunita, index = "shannon")
+
+# 4. Calcola l'Equoripartizione di Pielou (Evenness, J')
+# Indica quanto le specie sono distribuite equamente (va da 0 a 1)
+ricchezza <- specnumber(matrice_comunita)
+pielou_transetti <- shannon_transetti / log(ricchezza)
+
+# 5. Unisci i risultati in un'unica tabella pulita
+risultati_biodiversita <- data.frame(
+  Transetto = rownames(matrice_comunita),
+  Ricchezza_Specie = ricchezza,
+  Indice_Shannon = round(shannon_transetti, 3),
+  Equitabilita_Pielou = round(pielou_transetti, 3)
+)
+
+# 6. Visualizza la tabella finale
+print(risultati_biodiversita)
+
+#      Transetto Ricchezza_Specie Indice_Shannon Equitabilita_Pielou
+#T1        T1               40          3.042               0.825
+#T2        T2               39          3.007               0.821
+#T3        T3               33          2.903               0.830
+ 
+
+
+
 ##### CALCOLO FRIEDMAN 2025
 
 # 1. Installa e carica il pacchetto per leggere i file Excel
@@ -80,79 +155,6 @@ ggsave("grafico_transetti_2025.png", width = 8, height = 6, dpi = 300)
 
 
 
-### ricchezza di specie (Species Richness) per ciascun transetto
-
-# 1. Installa e carica il pacchetto dplyr per la manipolazione dei dati
-# install.packages("dplyr")
-library(dplyr)
-
-
-# 2. Calcola la ricchezza di specie e i contatti totali per transetto
-coppie2025 <- read_excel("C:/Runibo/dati_coppie_2025.xlsx")
-tabella_ricchezza <- coppie2025 %>%
-  # Filtra eliminando le righe dove la specie non è stata contattata (Contatti = 0)
-  filter(Coppie > 0) %>%
-  # Raggruppa i dati per transetto
-  group_by(Transetto) %>%
-  # Calcola le metriche
-  summarise(
-    Ricchezza_Specie = n_distinct(Specie), # Conta le specie uniche presenti
-    Contatti_Totali = sum(Coppie)        # Somma tutti gli uccelli visti
-  )
-
-# 3. Mostra la tabella dei risultati a schermo
-print(tabella_ricchezza)
-
-# A tibble: 3 × 3
-# Transetto Ricchezza_Specie Contatti_Totali
-# <chr>                <int>           <dbl>
-# 1 T1                      40            430.
-# 2 T2                      39            406 
-# 3 T3                      33            376.
-
-#### indice di biodiversità di Shannon-Wiener (\(H^{\prime }\))
-
-# 1. Installa e carica il pacchetto vegan per l'ecologia dei dati
-# install.packages("vegan")
-# install.packages("tidyr")
-library(vegan)
-library(dplyr)
-library(tidyr)
-
-# 2. Trasforma i dati nel formato richiesto da vegan (matrice sito x specie)
- matrice_comunita <- coppie2025 %>%
-  # Seleziona solo le colonne necessarie
-  select(Transetto, Specie, Coppie) %>%
-  # Ruota la tabella mettendo le specie come colonne e i transetti come righe
-  tidyr::pivot_wider(names_from = Specie, values_from = Coppie, values_fill = 0) %>%
-  # Imposta il nome del transetto come indice della riga
-  tibble::column_to_rownames(var = "Transetto")
-
-# 3. Calcola l'indice di Shannon-Wiener (base del logaritmo naturale)
-shannon_transetti <- diversity(matrice_comunita, index = "shannon")
-
-# 4. Calcola l'Equoripartizione di Pielou (Evenness, J')
-# Indica quanto le specie sono distribuite equamente (va da 0 a 1)
-ricchezza <- specnumber(matrice_comunita)
-pielou_transetti <- shannon_transetti / log(ricchezza)
-
-# 5. Unisci i risultati in un'unica tabella pulita
-risultati_biodiversita <- data.frame(
-  Transetto = rownames(matrice_comunita),
-  Ricchezza_Specie = ricchezza,
-  Indice_Shannon = round(shannon_transetti, 3),
-  Equitabilita_Pielou = round(pielou_transetti, 3)
-)
-
-# 6. Visualizza la tabella finale
-print(risultati_biodiversita)
-
-#Transetto Ricchezza_Specie Indice_Shannon Equitabilita_Pielou
-#T1        T1               40          3.042               0.825
-#T2        T2               39          3.007               0.821
-#T3        T3               33          2.903               0.830
- 
-
 
 #### WILCOXON SPONDE TAGLI
 
@@ -160,11 +162,11 @@ print(risultati_biodiversita)
 # Importa il file CSV (R riconosce automaticamente la struttura)
 dati_tagli <- read_excel("dati_tagli_2025.xlsx")
 
-# Visualizza l'anteprima per verificare che sia corretto
+# Visualizza l'anteprima
 head(dati_tagli)
 
 # 2. ESECUZIONE DEL TEST DI WILCOXON
-# Usiamo la funzione nativa wilcox.test() impostando:
+# Usa la funzione nativa wilcox.test() impostando:
 # paired = TRUE  -> specifica che i campioni sono appaiati (stesse 33 specie)
 # exact = FALSE  -> usa l'approssimazione normale con correzione (come fatto su Excel)
 
