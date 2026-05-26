@@ -197,6 +197,62 @@ abline(h = 0, col = "red", lty = 2) # Aggiunge la linea dello zero tratteggiata
 grafico_tagli
 
 
+### grafici
+# Carica le librerie necessarie (se non le hai, lancia prima: install.packages("ggplot2"))
+library(ggplot2)
+library(tidyr)
 
+# 1. Grafico di Profilo (Linee di Connessione)
+# Trasformiamo i dati in formato "long" per ggplot
+dati_long <- pivot_longer(dati_tagli, cols = c(T_dx, T_sx), 
+                          names_to = "Sponda", values_to = "Dominanza")
 
+grafico1 <- ggplot(dati_long, aes(x = Sponda, y = Dominanza, group = Specie)) +
+  geom_line(color = "gray", alpha = 0.7) +
+  geom_point(aes(color = Sponda), size = 3) +
+  theme_minimal() +
+  labs(title = "Profilo di Dominanza tra le due Sponde",
+       y = "Dominanza %", x = "")
+grafico1
+ggsave("grafico_sponde_2025_1.png", width = 8, height = 6, dpi = 300)
 
+# 2. Cleveland Dot Plot
+grafico2 <- ggplot(dati_tagli, aes(y = reorder(Specie, T_dx))) + # Ordina le specie per abbondanza
+  geom_segment(aes(x = T_dx, xend = T_sx, yend = Specie), color = "lightgray") +
+  geom_point(aes(x = T_dx, color = "Sponda destra"), size = 3) +
+  geom_point(aes(x = T_sx, color = "Sponda sinistra"), size = 3) +
+  theme_minimal() +
+  labs(title = "Distanza di Dominanza % Specie per Specie",
+       x = "Dominanza %", y = "Specie", color = "Legenda")
+grafico2
+ggsave("grafico_sponde_2025_2.png", width = 8, height = 6, dpi = 300)
+
+# 3. Grafico a specchio
+
+# 2. Struttura i dati nel formato corretto ("long format")
+# Supponiamo che il tuo dataset si chiami 'dati' e abbia le colonne: Specie, Transetto1, Transetto2
+
+# Applichiamo il segno meno solo ai valori del Transetto 1 per mandarli a sinistra
+dati_tagli$T_dx <- -dati_tagli$T_dx
+
+# Trasformiamo la tabella per renderla leggibile da ggplot
+dati_long <- pivot_longer(dati_tagli, cols = c(T_dx, T_sx), 
+                          names_to = "Sponda", values_to = "Dominanza")
+
+# 3. Generazione del Grafico a Specchio
+grafico3 <- ggplot(dati_long, aes(x = reorder(Specie, Dominanza), y = Dominanza, fill = Sponda)) +
+  geom_bar(stat = "identity") +
+  coord_flip() + # Ruota il grafico in orizzontale
+  scale_y_continuous(labels = abs) + # TRUCCO: mostra i valori a sinistra come positivi
+  scale_fill_manual(values = c("T_dx" = "#2c7bb6", "T_sx" = "#d7191c"),
+                    labels = c("T_dx" = "Sponda destra", "T_sx" = "Sponda sinistra")) +
+  theme_minimal() +
+  labs(title = "Profilo della Comunità Ornitologica a Specchio",
+       subtitle = "Confronto della dominanza % tra le due sponde (33 specie)",
+       x = "Specie",
+       y = "Dominanza %",
+       fill = "Sponde a confronto") +
+  theme(axis.text.y = element_text(size = 8), # Rimpicciolisce i nomi delle specie per leggerli tutti
+        legend.position = "bottom")
+grafico3
+ggsave("grafico_sponde_2025_3.png", width = 8, height = 6, dpi = 300)
