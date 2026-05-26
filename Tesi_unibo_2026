@@ -1,0 +1,113 @@
+##### CALCOLO FRIEDMAN 2025
+
+# 1. Installa e carica il pacchetto per leggere i file Excel (fallo solo se non lo hai già)
+# install.packages("readxl")
+library("readxl")
+
+# 2. Importa i tuoi dati da Excel
+# Nota: sostituisci il percorso del file con quello reale sul tuo computer
+setwd("C:/Runibo")
+dati2025 <- read_excel("C:/Runibo/dati_ornitologia_2025.xlsx")
+
+# 3. Controlla l'anteprima dei dati per verificare che sia tutto corretto
+head(dati2025)
+
+# 4. Esegui il test di Friedman
+risultato_test <- friedman.test(Abbondanza ~ Transetto | Specie, data = dati2025)
+
+# 5. Visualizza il risultato a schermo
+Friedman_2025 <- print(risultato_test)
+Friedman_2025
+
+#Friedman rank sum test
+
+#data:  Abbondanza and Transetto and Specie
+#Friedman chi-squared = 3.9454, df = 2, p-value = 0.1391
+
+#### GRAFICO FRIEDMAN
+
+# 1. Installa e carica il pacchetto per i grafici (fallo solo se non lo hai già)
+# install.packages("ggplot2")
+library(ggplot2)
+
+# 2. Crea il grafico
+Grafico_Friedman_2025 <- ggplot(dati2025, aes(x = Transetto, y = Abbondanza, fill = Transetto)) +
+  # Disegna i boxplot semitrasparenti per vedere i punti sotto
+  geom_boxplot(alpha = 0.6, outlier.shape = NA) +
+  # Aggiunge i punti delle 49 specie evitando che si sovrappongano perfettamente
+  geom_jitter(width = 0.2, alpha = 0.5, color = "black") +
+  # Applica un tema grafico pulito e professionale
+  theme_minimal() +
+  # Personalizza i colori dei transetti (puoi cambiarli a piacimento)
+  scale_fill_brewer(palette = "Dark2") +
+  # Rimuove la legenda laterale poiché i transetti sono già indicati sull'asse X
+  theme(legend.position = "none") +
+  # Aggiunge i testi e i titoli degli assi
+  labs(
+    title = "Distribuzione delle specie nei tre transetti",
+    subtitle = "Test di Friedman: p-value = 0.1585 (Non Significativo)",
+    x = "Transetti di Campionamento",
+    y = "Dominanza % per Specie"
+  )
+Grafico_Friedman_2025
+
+# Grafico con scala logaritmica sull'asse Y per renderlo visivamente più equilibrato.
+#install.packages("scales") 
+
+# Crea il grafico con l'asse Y in scala logaritmica (log10 + 1)
+Grafico_2025 <- ggplot(dati2025, aes(x = Transetto, y = Abbondanza, fill = Transetto)) +
+  # Disegna i boxplot senza mostrare gli outlier (evita duplicati con geom_jitter)
+  geom_boxplot(alpha = 0.6, outlier.shape = NA) +
+  # Mostra le 49 specie come punti spaziati
+  geom_jitter(width = 0.2, alpha = 0.5, color = "black") +
+  # Trasforma l'asse Y in scala logaritmica inserendo etichette con i numeri reali
+  scale_y_log10(labels = scales::label_comma(), breaks = c(0, 1, 2, 5, 10, 20, 50, 100)) +
+  # Applica un tema grafico pulito
+  theme_minimal() +
+  scale_fill_brewer(palette = "Dark2") +
+  theme(legend.position = "none") +
+  labs(
+    title = "Distribuzione delle specie nei tre transetti (Scala Logaritmica)",
+    subtitle = "Test di Friedman: p-value = 0.1585 (Non Significativo)",
+    x = "Transetti di Campionamento",
+    y = "Dominanza % per Specie (Scala Log)"
+  )
+Grafico_2025
+
+# Salva il grafico nella cartella di lavoro corrente
+ggsave("grafico_transetti_2025.png", width = 8, height = 6, dpi = 300)
+
+
+
+### ricchezza di specie (Species Richness) per ciascun transetto
+
+
+
+#### WILCOXON SPONDE TAGLI
+
+# 1. CARICAMENTO DEI DATI
+# Importa il file CSV (R riconosce automaticamente la struttura)
+dati_tagli <- read_excel("dati_tagli_2025.xlsx")
+
+# Visualizza l'anteprima per verificare che sia corretto
+head(dati_tagli)
+
+# 2. ESECUZIONE DEL TEST DI WILCOXON
+# Usiamo la funzione nativa wilcox.test() impostando:
+# paired = TRUE  -> specifica che i campioni sono appaiati (stesse 33 specie)
+# exact = FALSE  -> usa l'approssimazione normale con correzione (come fatto su Excel)
+
+risultato <- wilcox.test(dati_tagli$T_sx, dati_tagli$T_dx, 
+                         paired = TRUE, 
+                         exact = FALSE, 
+                         correct = TRUE)
+
+# 3. VISUALIZZAZIONE DEL RISULTATO
+wilcoxon_tagli <- print(risultato)
+wilcoxon_tagli
+
+#        Wilcoxon signed rank test with continuity correction
+#data:  dati_tagli$T_sx and dati_tagli$T_dx
+#V = 302.5, p-value = 0.7008
+#alternative hypothesis: true location shift is not equal to 0
+
