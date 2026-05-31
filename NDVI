@@ -32,6 +32,21 @@ ndvi_2025 <- (b8_2025 - b4_2025) / (b8_2025 + b4_2025)
 # 7. Salvo il risultato
 writeRaster(ndvi_2025, "ndvi_ombrone_2025.tif", overwrite=TRUE)
 
+####### --- CALCOLO SENTINEL-2 (2025-tagli) --- ####
+
+# a. Carico le bande di Sentinel-2
+b4_T2025 <- rast("C:/RTesi/Tagli_2025_Sentinel-2_L2A_B04_(Raw).tiff") # Rosso
+b8_T2025 <- rast("C:/RTesi/Tagli_2025_Sentinel-2_L2A_B08_(Raw).tiff") # Vicino Infrarosso
+band_Red_resampled <- resample(b4_T2025, b8_T2025)
+
+# b. Applico la formula NDVI
+ndvi_T2025 <- (b8_T2025 - band_Red_resampled) / (b8_T2025 + band_Red_resampled)
+
+# c. Salvo il risultato
+writeRaster(ndvi_T2025, "ndvi_tagli_2025.tif", overwrite=TRUE)
+
+
+
 
 # 8. Ricampiono per far combaciare i pixel di Lansat 8 (2013) e Sentinel 2 (2025)
 resample(ndvi_2013, ndvi_2025)
@@ -93,3 +108,34 @@ risultato_finale$Delta_NDVI <- risultato_finale$NDVI_2025 - risultato_finale$NDV
 
 # Salva il file finale usando il punto e virgola (standard italiano per Excel)
 write.csv2(risultato_finale, "valori_ndvi_32632.csv", row.names = FALSE)
+
+
+
+####
+ndvi_tagli_2025 <- rast("ndvi_tagli_2025.tif")
+
+# 2. Carica i punti (esempio da CSV)
+# Indica a R il punto e virgola come separatore di colonna e la virgola come decimale
+dati_Tpunti <- read.csv("puntiT.csv", sep = ";", dec = ",")
+
+# Ora puoi lanciare vect indicando le colonne separate
+punti_Tgeo <- vect(dati_Tpunti, geom = c("est", "nord"), crs = "EPSG:32632")
+
+
+# 4. ALLINEAMENTO DEI SISTEMI DI RIFERIMENTO
+# Landsat e Sentinel per Grosseto usano spesso la zona UTM 32N (32632) o 33N (32633).
+# Questa riga converte automaticamente i punti SOLO se il raster ha una zona diversa.
+punti_Tproiettati_2025 <- project(punti_Tgeo, crs(ndvi_T2025))
+
+# 5. ESTRAI I VALORI
+valori_T2025 <- extract(ndvi_T2025, punti_Tproiettati_2025)
+
+# 6. CREA IL REPORT FINALE
+risultato_Tfinale <- data.frame(
+  Dati_Originali = dati_Tpunti, 
+  NDVI_2025      = valori_T2025[, 2]
+)
+
+
+# Salva il file finale usando il punto e virgola (standard italiano per Excel)
+write.csv2(risultato_Tfinale, "valori_ndvi_tagli_32632.csv", row.names = FALSE)
