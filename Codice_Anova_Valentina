@@ -1,0 +1,319 @@
+# =====================================================================
+# ---- ANALISI INDICI DIVERSITA': 2025 ----
+# =====================================================================
+
+# ANOVA / Kruskal-Wallis (Indici di Diversità 2025):
+# In R, partendo dal foglio Contatti_Specie filtrato sul 2025, si calcoleranno gli indici
+# (Ricchezza S, Shannon H', Pielou J') per ogni ID_SEGMENTO.
+# I valori ottenuti verranno uniti al foglio Segmenti tramite un left_join().
+# A quel punto, useremo i modelli lineari inserendo NOME_TRATTO come fattore a 3 livelli
+# (e eventualmente l'NDVI come covariata, o altre covariate).
+
+## ---- packages ----
+{
+  library(tidyverse)
+  library(readxl)
+  library(vegan) # per il calcolo degli indici ecologici
+  library(car) # per il test di Levene (omogeneità delle varianze)
+  library(MASS) # per glm.nb()
+  library(emmeans) # per i confronti post-hoc dei GLM
+}
+
+
+## ---- load data ----
+{
+  specie <- readxl::read_xlsx(
+    "data/Dati_Farlocchi_Ombrone.xlsx",
+    sheet = "Contatti_Specie"
+  )
+  segmenti <- readxl::read_xlsx(
+    "data/Dati_Farlocchi_Ombrone.xlsx",
+    sheet = "Segmenti"
+  )
+}
+
+## ---- data preparation ----
+{
+  # Filtriamo i segmenti del 2025
+  seg_2025 <- segmenti %>%
+    filter(ANNO == 2025)
+
+  # Filtriamo i contatti del 2025 e aggreghiamo per segmento (sommando le sponde)
+  # per avere il dato totale del segmento da confrontare tra i tre tratti
+  specie_2025 <- specie %>%
+    filter(ID_SEGMENTO %in% seg_2025$ID_SEGMENTO) %>%
+    group_by(ID_SEGMENTO, SPECIE) %>%
+    summarise(CONTEGGIO_TOT = sum(CONTEGGIO), .groups = "drop")
+
+  # Trasformiamo in formato WIDE (Siti x Specie) per il pacchetto vegan
+  matrice_comunita <- specie_2025 %>%
+    pivot_wider(
+      names_from = SPECIE,
+      values_from = CONTEGGIO_TOT,
+      values_fill = 0
+    ) %>%
+    column_to_rownames("ID_SEGMENTO")
+}
+
+## =====================================================================
+## ---- CALCOLO INDICI DIVERSITA' e TABELLA RIASSUNTIVA ----
+## =====================================================================
+{
+  indici_calcolati <- tibble(
+    ID_SEGMENTO = rownames(matrice_comunita),
+    Ricchezza_S = specnumber(matrice_comunita), # N° specie
+    Shannon_H = diversity(matrice_comunita, index = "shannon"), # Indice di Shannon
+    Evenness_J = Shannon_H / log(Ricchezza_S) # Pielou J
+  )
+}
+
+# Uniamo gli indici alle informazioni ambientali dei segmenti
+dataset_analisi_1 <- seg_2025 %>%
+  left_join(indici_calcolati, by = "ID_SEGMENTO")
+
+# creazione tabella riassuntiva (Media ± SD)
+{
+  tabella_riassuntiva <- dataset_analisi_1 %>%
+    group_by(NOME_TRATTO) %>%
+    summarise(
+      N_segmenti = n(),
+      S_media = mean(Ricchezza_S, na.rm = TRUE),
+      S_dev_std = sd(Ricchezza_S, na.rm = TRUE),
+      H_media = mean(Shannon_H, na.rm = TRUE),
+      H_dev_std = sd(Shannon_H, na.rm = TRUE),
+      J_media = mean(Evenness_J, na.rm = TRUE),
+      J_dev_std = sd(Evenness_J, na.rm = TRUE)
+    )
+  # Formattiamo la tabella
+  tabella_riassuntiva_formattata <- tabella_riassuntiva |>
+    mutate(
+      `Ricchezza (S)` = sprintf("%.2f ± %.2f", S_media, S_dev_std),
+      `Shannon (H')` = sprintf("%.2f ± %.2f", H_media, H_dev_std),
+      `Evenness (J')` = sprintf("%.2f ± %.2f", J_media, J_dev_std)
+    ) %>%
+    select(
+      NOME_TRATTO,
+      N_segmenti,
+      `Ricchezza (S)`,
+      `Shannon (H')`,
+      `Evenness (J')`
+    )
+}
+print("--- TABELLA RIASSUNTIVA INDICI PER TRANSETTO (2025) ---")
+print(tabella_riassuntiva_formattata)
+
+# AGGIUNGERE GRAFICO
+
+## ==============================================================================
+## ---- ANOVA: DIFFERENZE TRA TRATTI DI FIUME ----
+## ==============================================================================
+
+# ANOVA sulla Ricchezza di Specie rispetto al Tratto
+{
+  anova_S <- aov(Ricchezza_S ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
+
+  # verifica degli assunti dell'ANOVA: importante, da fare prima di guardare i risultati!
+  # perché se gli assunti non sono rispettati dobbiamo passare al blocco di analisi successivo
+  shapiro.test(residuals(anova_S)) # non è ok, i residui non sono normali (si vede dal fatto che il p-value è inferiore a 0.05)
+  levene_S <- leveneTest(Ricchezza_S ~ NOME_TRATTO, data = dataset_analisi_1)
+  print(levene_S) # anche qui non ci siamo, le varianze non sono omogenee
+
+  # Se invece i due test sopra sono ok, e solo se l'ANOVA è significativa,
+  # si fa il test post-hoc di Tukey per vedere quali tratti differiscono
+  print("--- TEST POST-HOC TUKEY RICCHEZZA (S) ---")
+  print(TukeyHSD(anova_S))
+  plot(TukeyHSD(anova_S))
+  # per i dati farlocchi, si evidenzia in particolare una differenza significativa tra Cuneo_Salino e A_Monte
+  # si vede dal fatto che l'intervallo di confidenza non include lo 0 e dal valore di p adj nella tabella
+  # ma in realtà questi risultati non li possiamo considerare buoni perché gli assunti non erano rispettati
+}
+
+## RIPETERE PER GLI ALTRI INDICI DI DIVERSITA', ES:
+
+# ANOVA sull'Indice di Shannon includendo l'NDVI come covariata (ANCOVA)
+{
+  anova_H <- aov(Shannon_H ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
+  print("--- RISULTATI ANCOVA SHANNON (H') CON NDVI ---")
+  print(summary(anova_H))
+
+  # ... proseguire con gli stessi step del codice per la ricchezza in specie
+}
+
+
+# ==============================================================================
+# ATTENZIONE!!
+# se gli assunti delle ANOVA qui sopra non sono rispettati (cioè se shapiro test
+# e leven test hanno p < 0.05) dobbiamo passare ai GLM che sono qui sotto
+# MA
+# dobbiamo fare dei GLM diversi a seconda che consideriamo ricchezza, Shannon, o Pielou
+# perché
+# la Ricchezza è assimilabile a un conteggio e ha distribuzione poissoniana
+# Shannon si comporta di solito come una variabile normale (distribuzione gaussiana o Gamma)
+# Pielou è un casino perché esprime una proporzione e ci vuole una Regressione Beta
+#
+# quindi qui sotto ci sono tre sezioni separate per i tre indici di diversità
+# ==============================================================================
+
+## ==============================================================================
+## ---- GLM: RICCHEZZA ----
+## ==============================================================================
+
+# Modello con Tratto e NDVI come predittori - passando al GLM,
+# possiamo già inserire altre variabili esplicative come l'NDVI
+{
+  glm_poisson <- glm(
+    Ricchezza_S ~ NOME_TRATTO + NDVI,
+    family = poisson(link = "log"),
+    data = dataset_analisi_1
+  )
+
+  ### ---- VERIFICA DEGLI ASSUNTI: SOVRADISPERSIONE (Overdispersion) e SOTTODISPERSIONE (Underdispersion) -----
+  # Nei dati di Poisson, la varianza dovrebbe essere uguale alla media.
+  # Se la varianza è molto più alta, il modello sottostima gli errori (p-value falsamente troppo significativi).
+  # Un modo rapido per controllarla è dividere la Residual Deviance per i Gradi di Libertà (Df):
+
+  residual_deviance <- glm_poisson$deviance
+  df_residual <- glm_poisson$df.residual
+  ratio_dispersione <- residual_deviance / df_residual
+}
+
+cat("\nRatio di dispersione:", ratio_dispersione, "\n")
+# REGOLA: Se il ratio è vicino a 1 (es. tra 0.7 e 1.3), la Poisson va bene.
+# Se è decisamente > 1.3, c'è sovradispersione!
+# Se è inferiore a 0.7, c'è sottodispersione (raro)
+
+### ================================================================================================
+### ---- SELEZIONE AUTOMATICA DEL MODELLO CHE TIENE CONTO DI EVENTUALI PROBLEMI DI DISPERSIONE -----
+### ================================================================================================
+{
+  if (ratio_dispersione > 1.3) {
+    # --- CASO A: SOVRADISPERSIONE -> NEGATIVE BINOMIAL ---
+    print("--- RILEVATA SOVRADISPERSIONE: Eseguo il GLM Binomiale Negativa ---")
+
+    glm_ricchezza_finale <- glm.nb(
+      Ricchezza_S ~ NOME_TRATTO + NDVI,
+      data = dataset_analisi_1
+    )
+  } else if (ratio_dispersione < 0.7) {
+    # --- CASO B: SOTTODISPERSIONE -> QUASIPOISSON ---
+    print(
+      "--- RILEVATA SOTTODISPERSIONE: Uso Quasipoisson per correggere gli errori ---"
+    )
+
+    glm_ricchezza_finale <- glm(
+      Ricchezza_S ~ NOME_TRATTO + NDVI,
+      family = quasipoisson(link = "log"),
+      data = dataset_analisi_1
+    )
+  } else {
+    # --- CASO C: DISPERSIONE NELLA NORMA -> POISSON ---
+    print(
+      "--- DISPERSIONE NELLA NORMA: Procedo con il GLM Poisson classico ---"
+    )
+    glm_ricchezza_finale <- glm_poisson
+  }
+}
+
+print("--- SUMMARY DEL GLM ---")
+summary(glm_ricchezza_finale)
+
+
+### ================================================================================================
+### ---- TEST POST-HOC PER IL GLM (Confronti a coppie tra Tratti) -----
+### ================================================================================================
+# Nel GLM non si usa TukeyHSD(). Usiamo il pacchetto 'emmeans' per i confronti a coppie
+# install.packages("emmeans")
+library(emmeans)
+
+print("--- CONFRONTI POST-HOC TRA TRATTI (EMMEANS) ---")
+# type = "response" ci restituisce i valori già trasformati dalla scala logaritmica a quella reale dei conteggi
+confronti_tratti <- emmeans(
+  glm_ricchezza_finale,
+  specs = pairwise ~ NOME_TRATTO,
+  type = "response"
+)
+print(confronti_tratti$contrasts)
+# nel caso dei dati farlocchi, si evidenzia una differenza quasi significativa tra A_Monte e Cuneo_Salino
+
+## ==============================================================================
+## ---- LM: SHANNON ----
+## ==============================================================================
+{
+  # se gli assunti dell'anova non erano rispettati, molto probabilmente ci saranno problemi
+  # anche con il GLM gaussian o gamma se non trasformiamo i dati
+  # usiamo una gaussiana quindi di fatto questo è un linear model (lm)
+
+  ### ---- Trasformazione BoxCox -----
+  # faccio quindi subito una trasformazione BoxCox per raggiungere per quanto possibile la normalità
+  {
+    dataset_analisi_1 <- dataset_analisi_1 |>
+      mutate(Shannon_H_pos = Shannon_H + 1)
+    bctrans <- boxcox(
+      Shannon_H_pos ~ NOME_TRATTO + NDVI,
+      data = dataset_analisi_1,
+      lambda = seq(0, 5, length = 10)
+    )
+    potenza <- bctrans$x[which(bctrans$y == max(bctrans$y))]
+    dataset_analisi_1 <- dataset_analisi_1 |>
+      mutate(Shannon_H_transf = Shannon_H_pos^potenza)
+  }
+
+  ### ---- Modello di regressione -----
+  {
+    lm_shannon <- lm(
+      Shannon_H_transf ~ NOME_TRATTO + NDVI,
+      data = dataset_analisi_1
+    )
+    par(mfrow = c(2, 2))
+    plot(lm_shannon)
+    par(mfrow = c(1, 1))
+  }
+  print("--- LM GAUSSIANO PER INDICE DI SHANNON (H') ---")
+  summary(lm_shannon)
+  # codice di riserva, se analizzando i dati veri vediamo che è meglio una gamma
+  # {
+  #   glm_shannon <- glm(
+  #     Shannon_H_transf ~ NOME_TRATTO + NDVI,
+  #     family = Gamma(link = "log"),
+  #     data = dataset_analisi_1
+  #   )
+  # }
+
+  ### ================================================================================================
+  ### ---- TEST POST-HOC PER IL lLM (Confronti a coppie tra tratti) -----
+  ### ================================================================================================
+  posthoc_shannon <- emmeans(glm_shannon, specs = pairwise ~ NOME_TRATTO)
+  print(posthoc_shannon$contrasts)
+}
+
+## ==============================================================================
+## ---- GLM: PIELOU ----
+## ==============================================================================
+{
+  print("--- REGRESSIONE BETA PER EVENNESS DI PIELOU (J') ---")
+
+  # Nota: la regressione Beta richiede che i valori siano strettamente COMPRESI tra 0 e 1.
+  # Se ci sono valori esattamente uguali a 1 (es. segmenti con una sola specie dove J è non calcolabile o forzato a 1),
+  # vanno rimossi o trasformati leggermente.
+  {
+  dataset_beta <- dataset_analisi_1 %>%
+    filter(Evenness_J > 0 & Evenness_J < 1)
+
+  # Costruzione del modello Beta
+  modello_beta_j <- betareg(
+    Evenness_J ~ NOME_TRATTO + NDVI,
+    data = dataset_beta
+  )
+  }
+  summary(modello_beta_j)
+
+  ### ================================================================================================
+  ### ---- TEST POST-HOC PER IL GLM (Confronti a coppie tra Tratti) -----
+  ### ================================================================================================
+  posthoc_pielou <- emmeans(
+    modello_beta_j,
+    specs = pairwise ~ NOME_TRATTO,
+    type = "response"
+  )
+  print(posthoc_pielou$contrasts)
+}
