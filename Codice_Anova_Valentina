@@ -10,6 +10,14 @@
 # (e eventualmente l'NDVI come covariata, o altre covariate).
 
 ## ---- packages ----
+#  install.packages("tidyverse")
+#  install.packages("readxl")
+#  install.packages("vegan")
+#  install.packages("car")
+#  install.packages("MASS")
+#  install.packages("emmeans")
+#  install.packages("flextable")
+
 {
   library(tidyverse)
   library(readxl)
@@ -17,17 +25,22 @@
   library(car) # per il test di Levene (omogeneità delle varianze)
   library(MASS) # per glm.nb()
   library(emmeans) # per i confronti post-hoc dei GLM
+  library(dplyr)
+  library(flextable)
+  library(officer)
 }
 
 
 ## ---- load data ----
+setwd("C:/RTesi")
+
 {
   specie <- readxl::read_xlsx(
-    "data/Dati_Farlocchi_Ombrone.xlsx",
+    "C:/RTesi/dati_ombrone_provvisori.xlsx",
     sheet = "Contatti_Specie"
   )
   segmenti <- readxl::read_xlsx(
-    "data/Dati_Farlocchi_Ombrone.xlsx",
+    "C:/RTesi/dati_ombrone_provvisori.xlsx",
     sheet = "Segmenti"
   )
 }
@@ -85,24 +98,96 @@ dataset_analisi_1 <- seg_2025 %>%
       J_dev_std = sd(Evenness_J, na.rm = TRUE)
     )
   # Formattiamo la tabella
-  tabella_riassuntiva_formattata <- tabella_riassuntiva |>
-    mutate(
-      `Ricchezza (S)` = sprintf("%.2f ± %.2f", S_media, S_dev_std),
-      `Shannon (H')` = sprintf("%.2f ± %.2f", H_media, H_dev_std),
-      `Evenness (J')` = sprintf("%.2f ± %.2f", J_media, J_dev_std)
-    ) %>%
-    select(
-      NOME_TRATTO,
-      N_segmenti,
-      `Ricchezza (S)`,
-      `Shannon (H')`,
-      `Evenness (J')`
-    )
-}
+tabella_riassuntiva_formattata <- tabella_riassuntiva |>
+  mutate(
+    `Ricchezza (S)` = sprintf("%.2f ± %.2f", S_media, S_dev_std),
+    `Shannon (H')`  = sprintf("%.2f ± %.2f", H_media, H_dev_std),
+    `Evenness (J')` = sprintf("%.2f ± %.2f", J_media, J_dev_std)
+  ) |>
+  dplyr::select(
+    NOME_TRATTO,
+    N_segmenti,
+    `Ricchezza (S)`,
+    `Shannon (H')`,
+    `Evenness (J')`
+  )
+
 print("--- TABELLA RIASSUNTIVA INDICI PER TRANSETTO (2025) ---")
 print(tabella_riassuntiva_formattata)
 
+# A tibble: 3 × 5
+#  NOME_TRATTO N_segmenti `Ricchezza (S)` `Shannon (H')` `Evenness (J')`
+#  <chr>            <int> <chr>           <chr>          <chr>          
+# 1 Monte               25 12.08 ± 2.52    2.28 ± 0.22    0.92 ± 0.03    
+# 2 Tagli               25 10.92 ± 2.81    2.18 ± 0.31    0.92 ± 0.06    
+# 3 Valle               28 11.61 ± 2.74    2.28 ± 0.26    0.94 ± 0.03    
+
+
+# Crea la tabella formattata per Word
+ft <- flextable(tabella_riassuntiva_formattata) |> 
+  autofit() |>                         # Adatta la larghezza delle colonne
+  bold(part = "header") |>             # Intestazione in grassetto
+  theme_booktabs()                     # Stile pulito e professionale
+
+# Salva il file
+save_as_docx(ft, path = "tabella_tratti-2025.docx")
+
+
 # AGGIUNGERE GRAFICO
+
+library(ggplot2)
+
+# grafico solo SHANNON
+ggplot(tabella_riassuntiva, aes(x = NOME_TRATTO, y = H_media, fill = NOME_TRATTO)) +
+  # Disegna le barre
+  geom_col(color = "black", alpha = 0.9, show.legend = FALSE, width = 0.6) +
+  # Disegna le barre di errore per la deviazione standard
+  geom_errorbar(aes(ymin = H_media - H_dev_std, ymax = H_media + H_dev_std), 
+                width = 0.15, color = "black", linewidth = 0.7) +
+  # Applica la palette viridis
+  scale_fill_viridis_d(option = "viridis", begin = 0.2, end = 0.8) + 
+  # Testi del grafico
+  labs(
+    title = "Indice di Diversità di Shannon per Tratto",
+    x = "Tratto Monitorato",
+    y = "Indice di Shannon (H') ± Dev.Std."
+  ) +
+  # Stile grafico pulito ed elegante
+  theme_minimal(base_size = 13) +
+  theme(
+    panel.grid.major.x = element_blank(), # Rimuove le linee verticali di sfondo
+    plot.title = element_text(face = "bold", hjust = 0.5) # Titolo in grassetto e centrato
+  )
+
+# Salvare il grafico sul pc
+ggsave("grafico_shannon.png", width = 8, height = 5, dpi = 300)
+
+# Grafico tre parametri
+
+ggplot(dati_lungi, aes(x = NOME_TRATTO, y = media, group = 1)) +
+  # Disegna le linee che uniscono i punti (usiamo un colore neutro scuro)
+  geom_line(color = "#3b528b", linewidth = 1) +
+  # Aggiunge le barre di errore sotto i punti
+  geom_errorbar(aes(ymin = media - dev_std, ymax = media + dev_std), 
+                width = 0.1, color = "black", linewidth = 0.6) +
+  # Disegna i punti colorati sopra le linee usando la palette magma
+  geom_point(aes(color = NOME_TRATTO), size = 4, show.legend = FALSE) +
+  facet_wrap(~Indice, scales = "free_y") +
+  scale_color_viridis_d(option = "viridis", begin = 0.2, end = 0.8) +
+  labs(
+    title = "Andamento degli Indici di Biodiversità nei Tratti",
+    x = "Tratto",
+    y = "Valore Medio ± Dev.Std."
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    strip.text = element_text(face = "bold", size = 11),
+    strip.background = element_rect(fill = "gray95", color = NA),
+    plot.title = element_text(face = "bold", hjust = 0.5)
+   )
+
+ggsave("grafico_biodiversita_completo.png", width = 11, height = 5, dpi = 300)
+
 
 ## ==============================================================================
 ## ---- ANOVA: DIFFERENZE TRA TRATTI DI FIUME ----
