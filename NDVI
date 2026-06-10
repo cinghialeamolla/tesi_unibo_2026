@@ -1,54 +1,51 @@
 ### Calcolo NDVI
 
 setwd("C:/RTesi")
-
-# 1. Installa e carica il pacchetto terra
-# install.packages("terra")
 library(terra)
 
 # --- CALCOLO LANDSAT 8 (2013) ---
 
-# 2. Carico le bande di Landsat 8
+# Carico le bande di Landsat 8
 
 b4_2013 <- rast("C:/RTesi/16_giugno_2013_LC08_B4.TIF") # Rosso
 b5_2013 <- rast("C:/RTesi/16_giugno_2013_LC08_B5.TIF") # Vicino Infrarosso
 
-# 3. Applico la formula NDVI
+# Applico la formula NDVI
 ndvi_2013 <- (b5_2013 - b4_2013) / (b5_2013 + b4_2013)
 
-# 4. Salvo il risultato in un nuovo file GeoTIFF geografico
+# Salvo il risultato in un nuovo file GeoTIFF geografico
 writeRaster(ndvi_2013, "ndvi_ombrone_2013.tif", overwrite=TRUE)
 
 
 # --- CALCOLO SENTINEL-2 (2025) ---
 
-# 5. Carico le bande di Sentinel-2
+# Carico le bande di Sentinel-2
 b4_2025 <- rast("C:/RTesi/24_maggio_2025_Sentinel-2_L2A_B04_(Raw).tiff") # Rosso
 b8_2025 <- rast("C:/RTesi/24_maggio_2025_Sentinel-2_L2A_B08_(Raw).tiff") # Vicino Infrarosso
 
-# 6. Applico la formula NDVI
+# Applico la formula NDVI
 ndvi_2025 <- (b8_2025 - b4_2025) / (b8_2025 + b4_2025)
 
-# 7. Salvo il risultato
+# Salvo il risultato
 writeRaster(ndvi_2025, "ndvi_ombrone_2025.tif", overwrite=TRUE)
 
 ####### --- CALCOLO SENTINEL-2 (2025-tagli) --- ####
 
-# a. Carico le bande di Sentinel-2
+# Carico le bande di Sentinel-2
 b4_T2025 <- rast("C:/RTesi/Tagli_2025_Sentinel-2_L2A_B04_(Raw).tiff") # Rosso
 b8_T2025 <- rast("C:/RTesi/Tagli_2025_Sentinel-2_L2A_B08_(Raw).tiff") # Vicino Infrarosso
 band_Red_resampled <- resample(b4_T2025, b8_T2025)
 
-# b. Applico la formula NDVI
+# Applico la formula NDVI
 ndvi_T2025 <- (b8_T2025 - band_Red_resampled) / (b8_T2025 + band_Red_resampled)
 
-# c. Salvo il risultato
+# Salvo il risultato
 writeRaster(ndvi_T2025, "ndvi_tagli_2025.tif", overwrite=TRUE)
 
 
 
 
-# 8. Ricampiono per far combaciare i pixel di Lansat 8 (2013) e Sentinel 2 (2025)
+# Ricampiono per far combaciare i pixel di Lansat 8 (2013) e Sentinel 2 (2025)
 resample(ndvi_2013, ndvi_2025)
 
 # class       : SpatRaster
@@ -63,136 +60,62 @@ resample(ndvi_2013, ndvi_2025)
 # max value   :                    NaN
 
 
-# 9. Visualizzo un'anteprima veloce a schermo
+# Visualizzo un'anteprima veloce a schermo
 par(mfrow=c(2,1))
 plot(ndvi_2025, main="NDVI Grosseto 2025", col=rev(terrain.colors(10)))
 plot(ndvi_2013, main="NDVI Grosseto 2013", col=rev(terrain.colors(10)))
 
 
 
-## SALVARE DATI NDVI
-# 1. Carica i tuoi raster NDVI
-setwd("C:/RTesi")
-library(terra)
 
+# =====================================================================
+# ---- ESTRAZIONE NDVI BUFFER 100M ----
+# =====================================================================
+
+# Carico i raster
 ndvi_2013 <- rast("ndvi_ombrone_2013.tif")
 ndvi_2025 <- rast("ndvi_ombrone_2025.tif")
 
-# 2. Carica i punti (esempio da CSV)
-# Indica a R il punto e virgola come separatore di colonna e la virgola come decimale
-dati_punti <- read.csv("punti.csv", sep = ";", dec = ",")
-
-# Ora puoi lanciare vect indicando le colonne separate
-punti_geo <- vect(dati_punti, geom = c("est", "nord"), crs = "EPSG:32632")
-
-
-# 4. ALLINEAMENTO DEI SISTEMI DI RIFERIMENTO
-# Landsat e Sentinel per Grosseto usano spesso la zona UTM 32N (32632) o 33N (32633).
-# Questa riga converte automaticamente i punti SOLO se il raster ha una zona diversa.
-punti_proiettati_2013 <- project(punti_geo, crs(ndvi_2013))
-punti_proiettati_2025 <- project(punti_geo, crs(ndvi_2025))
-
-# 5. ESTRAI I VALORI
-valori_2013 <- extract(ndvi_2013, punti_proiettati_2013)
-valori_2025 <- extract(ndvi_2025, punti_proiettati_2025)
-
-# 6. CREA IL REPORT FINALE
-risultato_finale <- data.frame(
-  Dati_Originali = dati_punti, 
-  NDVI_2013      = valori_2013[, 2], # Estrae la colonna con i valori del pixel
-  NDVI_2025      = valori_2025[, 2]
-)
-
-# Calcola la differenza temporale
-risultato_finale$Delta_NDVI <- risultato_finale$NDVI_2025 - risultato_finale$NDVI_2013
-
-# Salva il file finale usando il punto e virgola (standard italiano per Excel)
-write.csv2(risultato_finale, "valori_ndvi_32632.csv", row.names = FALSE)
-
-
-
-####
-ndvi_tagli_2025 <- rast("ndvi_tagli_2025.tif")
-
-# 2. Carica i punti (esempio da CSV)
-# Indica a R il punto e virgola come separatore di colonna e la virgola come decimale
-dati_Tpunti <- read.csv("puntiT.csv", sep = ";", dec = ",")
-
-# Ora puoi lanciare vect indicando le colonne separate
-punti_Tgeo <- vect(dati_Tpunti, geom = c("est", "nord"), crs = "EPSG:32632")
-
-
-# 4. ALLINEAMENTO DEI SISTEMI DI RIFERIMENTO
-# Landsat e Sentinel per Grosseto usano spesso la zona UTM 32N (32632) o 33N (32633).
-# Questa riga converte automaticamente i punti SOLO se il raster ha una zona diversa.
-punti_Tproiettati_2025 <- project(punti_Tgeo, crs(ndvi_T2025))
-
-# 5. ESTRAI I VALORI
-valori_T2025 <- extract(ndvi_T2025, punti_Tproiettati_2025)
-
-# 6. CREA IL REPORT FINALE
-risultato_Tfinale <- data.frame(
-  Dati_Originali = dati_Tpunti, 
-  NDVI_2025      = valori_T2025[, 2]
-)
-
-
-# Salva il file finale usando il punto e virgola (standard italiano per Excel)
-write.csv2(risultato_Tfinale, "valori_ndvi_tagli_32632.csv", row.names = FALSE)
-
-
-
-
-
-# =====================================================================
-# ---- ESTRAZIONE NDVI CON BUFFER DI 100M (Esclusione Acqua) ----
-# =====================================================================
-
-setwd("C:/RTesi")
-library(terra)
-
-# 1. Carichiamo i raster NDVI originali
-ndvi_2013 <- rast("ndvi_ombrone_2013.tif")
-ndvi_2025 <- rast("ndvi_ombrone_2025.tif")
-
-# 2. Carichiamo i punti GPS dal CSV
+# Carico il file.csv con le coordinate geografiche
 dati_punti <- read.csv("punti.csv", sep = ";", dec = ",")
 punti_geo  <- vect(dati_punti, geom = c("est", "nord"), crs = "EPSG:32632")
 
-# 3. Mascheriamo l'acqua nei raster
+# Devo eliminare i pixel di acqua acqua (Sotto lo 0.1 è acqua/suolo nudo umido)
 ndvi_2013_veg <- ifel(ndvi_2013 <= 0.1, NA, ndvi_2013)
 ndvi_2025_veg <- ifel(ndvi_2025 <= 0.1, NA, ndvi_2025)
 
-# 4. Allineamento dei sistemi di riferimento
+# Proietto correttamente i punti sul CRS di ciascun raster
 punti_2013 <- project(punti_geo, crs(ndvi_2013_veg))
 punti_2025 <- project(punti_geo, crs(ndvi_2025_veg))
 
-# 5. Creiamo il buffer di 100 metri intorno ai punti
+# Creo del buffer di 100 metri
 punti_buffer_2013 <- buffer(punti_2013, width = 100)
 punti_buffer_2025 <- buffer(punti_2025, width = 100)
 
-# 6. ESTRAZIONE RISOLVENDO IL CONFLITTO (usiamo terra::extract)
-valori_buffer_2013 <- terra::extract(ndvi_2013_veg, punti_buffer_2013, fun = mean, na.rm = TRUE)
-valori_buffer_2025 <- terra::extract(ndvi_2025_veg, punti_buffer_2025, fun = mean, na.rm = TRUE)
+# Estraggo i valori medi del buffer 
+ext_2013 <- terra::extract(ndvi_2013_veg, punti_buffer_2013, fun = mean, na.rm = TRUE)
+ext_2025 <- terra::extract(ndvi_2025_veg, punti_buffer_2025, fun = mean, na.rm = TRUE)
 
-# 7. Creiamo il report finale per i punti generali
-risultato_intorno <- data.frame(
-  Dati_Originali = dati_punti,
-  NDVI_Buffer_2013 = valori_buffer_2013[, 2],
-  NDVI_Buffer_2025 = valori_buffer_2025[, 2]
-)
+ext_2013 # mi servono i valori dell'ultima colonna
 
-# Calcoliamo il Delta NDVI spaziale
+# Creo il dataframe
+risultato_intorno <- dati_punti
+risultato_intorno$NDVI_Buffer_2013 <- ext_2013[[ncol(ext_2013)]]
+risultato_intorno$NDVI_Buffer_2025 <- ext_2025[[ncol(ext_2025)]]
+
+# Delta NDVI 
+#differenza tra 2025 e 2013
 risultato_intorno$Delta_NDVI_Buffer <- risultato_intorno$NDVI_Buffer_2025 - risultato_intorno$NDVI_Buffer_2013
 
-# Salviamo il file per Excel
+# Salvataggio file.csv
 write.csv2(risultato_intorno, "valori_ndvi_buffer_100m.csv", row.names = FALSE)
 
 
 # =====================================================================
-# ---- REPLICA DELLA PROCEDURA PER IL FILE DEI TAGLI (puntiT) ----
+# ---- ESTRAZIONE NDVI BUFFER 100M - tagli ----
 # =====================================================================
 
+# Qui c'è solo il 2025
 ndvi_T2025 <- rast("ndvi_tagli_2025.tif")
 ndvi_T2025_veg <- ifel(ndvi_T2025 <= 0.1, NA, ndvi_T2025)
 
@@ -202,88 +125,10 @@ punti_Tgeo  <- vect(dati_Tpunti, geom = c("est", "nord"), crs = "EPSG:32632")
 punti_Tproiettati_2025 <- project(punti_Tgeo, crs(ndvi_T2025_veg))
 punti_Tbuffer_2025     <- buffer(punti_Tproiettati_2025, width = 100)
 
-# Anche qui usiamo terra::extract per sicurezza
-valori_Tbuffer_2025 <- terra::extract(ndvi_T2025_veg, punti_Tbuffer_2025, fun = mean, na.rm = TRUE)
+ext_T2025 <- terra::extract(ndvi_T2025_veg, punti_Tbuffer_2025, fun = mean, na.rm = TRUE)
 
-risultato_Tintorno <- data.frame(
-  Dati_Originali = dati_Tpunti,
-  NDVI_Buffer_2025 = valori_Tbuffer_2025[, 2]
-)
+risultato_Tintorno <- dati_Tpunti
+risultato_Tintorno$NDVI_Buffer_2025 <- ext_T2025[[ncol(ext_T2025)]]
 
 write.csv2(risultato_Tintorno, "valori_ndvi_tagli_buffer_100m.csv", row.names = FALSE)
 
-
-# 1. Convertiamo la colonna NDVI in numerica per evitare il blocco del testo
-seg_2025_corretto <- seg_2025 %>%
-  mutate(
-    # Sostituiamo le virgole con i punti (se presenti) e convertiamo in numero
-    NDVI = as.numeric(gsub(",", ".", as.character(NDVI)))
-  )
-
-# 2. Calcolo delle nuove statistiche riassuntive dell'NDVI con buffer
-tabella_ndvi_buffer_2025 <- seg_2025_corretto %>%
-  mutate(NOME_TRATTO = factor(NOME_TRATTO, levels = c("Valle", "Monte", "Tagli"))) %>%
-  group_by(NOME_TRATTO) %>%
-  summarise(
-    N_segmenti = n(),
-    NDVI_medio = mean(NDVI, na.rm = TRUE),
-    NDVI_dev_std = sd(NDVI, na.rm = TRUE),
-    NDVI_min   = min(NDVI, na.rm = TRUE),
-    NDVI_max   = max(NDVI, na.rm = TRUE),
-    .groups    = "drop"
-  ) %>%
-  arrange(NOME_TRATTO)
-
-# 3. Formattazione editoriale pulita per la tesi
-tabella_ndvi_buffer_formattata <- tabella_ndvi_buffer_2025 %>%
-  mutate(
-    `NDVI Buffer (Media ± SD)` = sprintf("%.3f ± %.3f", NDVI_medio, NDVI_dev_std),
-    `Range Buffer (Min - Max)` = sprintf("[%.3f ; %.3f]", NDVI_min, NDVI_max)
-  ) %>%
-  select(
-    `Tratto Fluviale` = NOME_TRATTO,
-    `N° Segmenti`     = N_segmenti,
-    `NDVI Buffer (Media ± SD)`,
-    `Range Buffer (Min - Max)`
-  )
-
-# Mostra la tabella a schermo
-print("--- NUOVA TABELLA NDVI CON BUFFER DA 200M (2025) ---")
-print(tabella_ndvi_buffer_formattata)
-
-### STAMPARE TABELLA
-
-# 1. Creiamo l'oggetto flextable partendo dalla tabella formattata
-ft <- flextable(tabella_ndvi_buffer_formattata) %>%
-  # Adatta automaticamente la larghezza delle colonne al testo
-  autofit() %>%
-  # Allinea al centro il testo di tutte le colonne tranne la prima
-  align(j = 2:4, align = "center", part = "all") %>%
-  align(j = 1, align = "left", part = "all") %>%
-  # Sfondo grigio chiaro per l'intestazione
-  bg(bg = "#F2F2F2", part = "header") %>%
-  # Testo in grassetto per l'intestazione
-  bold(part = "header") %>%
-  # Rende in grassetto la prima colonna (i nomi dei tratti)
-  bold(j = 1, part = "body") %>%
-  # Imposta il font standard da tesi (es. Times New Roman o Arial)
-  font(fontname = "Times New Roman", part = "all") %>%
-  fontsize(size = 11, part = "all") %>%
-  # Aggiunge i bordi orizzontali in stile articolo scientifico (APA style)
-  border_remove() %>%
-  hline_top(border = fp_border(color = "black", width = 1.5), part = "header") %>%
-  hline_bottom(border = fp_border(color = "black", width = 1.5), part = "header") %>%
-  hline_bottom(border = fp_border(color = "black", width = 1.5), part = "body")
-
-# 2. Creiamo un documento Word vuoto e inseriamo la tabella con la didascalia
-doc <- read_docx() %>%
-  # Aggiungiamo il titolo/didascalia della tabella
-  body_add_par("Tabella X.X – Statistiche descrittive dell'Indice di Vegetazione (NDVI) calcolato con buffer da 200m per i tre tratti del fiume Ombrone (Anno 2025).", 
-               style = "Normal") %>%
-  # Inseriamo la tabella
-  body_add_flextable(value = ft)
-
-# 3. Salviamo il file Word nella tua cartella
-print(doc, target = "C:/RTesi/tabella_ndvi_tesi.docx")
-
-print("--- FILE WORD GENERATO CON SUCCESSO IN C:/RTesi/tabella_ndvi_tesi.docx ---")
