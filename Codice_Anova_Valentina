@@ -533,5 +533,171 @@ print(confronti)
 ### ---- SPERIMENTAZIONI PAM -----
 ### ================================================================================================
 
+library(flextable)
+library(officer)
+library(dplyr)
+library(broom)
+
+# --- PREPARAZIONE DATI PER LE 3 TABELLE ---
+
+# Tabella 1: Ricchezza (S) - GLM Quasipoisson
+dati_S <- tidy(glm_ricchezza_finale) %>%
+  mutate(term = case_when(
+    term == "(Intercept)" ~ "Intercetta (Monte)",
+    term == "NOME_TRATTOTagli" ~ "Tratto: Tagli",
+    term == "NOME_TRATTOValle" ~ "Tratto: Valle",
+    term == "NDVI" ~ "NDVI (Covariata)",
+    TRUE ~ term
+  )) %>%
+  select(term, estimate, std.error, statistic, p.value)
+
+# Tabella 2: Shannon (H') - ANCOVA
+dati_H <- tidy(anova_H) %>%
+  filter(term != "Residuals") %>%
+  mutate(term = case_when(
+    term == "NOME_TRATTO" ~ "Tratto (Monte vs Tagli vs Valle)",
+    term == "NDVI" ~ "NDVI (Covariata)",
+    TRUE ~ term
+  )) %>%
+  select(term, df, sumsq, meansq, statistic, p.value)
+
+# Tabella 3: Evenness (J') - Regressione Beta
+dati_J <- tidy(modello_beta_j) %>%
+  filter(component == "mean") %>%
+  mutate(term = case_when(
+    term == "(Intercept)" ~ "Intercetta (Monte)",
+    term == "NOME_TRATTOTagli" ~ "Tratto: Tagli",
+    term == "NOME_TRATTOValle" ~ "Tratto: Valle",
+    term == "NDVI" ~ "NDVI (Covariata)",
+    TRUE ~ term
+  )) %>%
+  select(term, estimate, std.error, statistic, p.value)
 
 
+# --- FUNZIONE AUSILIARIA PER APPLICARE LO STILE APA ---
+formatta_tabella <- function(df, tipo = "glm_beta") {
+  ft <- flextable(df) %>% theme_booktabs() %>% autofit()
+  
+  if (tipo == "glm_beta") {
+    ft <- ft %>%
+      colformat_double(j = c("estimate", "std.error", "statistic"), digits = 3) %>%
+      colformat_double(j = "p.value", digits = 4) %>%
+      set_header_labels(term = "Parametro", estimate = "Stima (Coef.)", std.error = "Err. Std.", statistic = "Statistica (t/z)", p.value = "p-value")
+  } else {
+    ft <- ft %>%
+      colformat_double(j = c("sumsq", "meansq", "statistic"), digits = 3) %>%
+      colformat_double(j = "p.value", digits = 4) %>%
+      set_header_labels(term = "Sorgente di Variazione", df = "Gradi Libertà (Df)", sumsq = "Somma Quadrati (SS)", meansq = "Quadrato Medio (MS)", statistic = "Valore F", p.value = "p-value")
+  }
+  return(ft)
+}
+
+ft_S <- formatta_tabella(dati_S, "glm_beta")
+ft_H <- formatta_tabella(dati_H, "ancova")
+ft_J <- formatta_tabella(dati_J, "glm_beta") %>%
+  bg(i = ~ p.value > 0.05 & p.value < 0.10, j = "p.value", bg = "#F5F5F5") # Evidenzia il trend di Valle
+
+# --- ESPORTAZIONE IN WORD (CORRETTO) ---
+doc <- read_docx() %>%
+  body_add_par("ANALISI INFERENZIALE DETTAGLIATA (DATI 2025)", style = "Normal") %>%
+  body_add_par("", style = "Normal") %>% # Sostituisce il vecchio spacer
+  
+  body_add_par("Tabella 1: Modello Lineare Generalizzato (Quasipoisson) per la Ricchezza di specie (S)", style = "heading 2") %>%
+  body_add_flextable(ft_S) %>% 
+  body_add_par("", style = "Normal") %>% # Riga vuota di distanziamento
+  
+  body_add_par("Tabella 2: Analisi della Covarianza (ANCOVA) per l'Indice di diversità di Shannon (H')", style = "heading 2") %>%
+  body_add_flextable(ft_H) %>% 
+  body_add_par("", style = "Normal") %>% # Riga vuota di distanziamento
+  
+  body_add_par("Tabella 3: Regressione Beta per l'Evenness di Pielou (J')", style = "heading 2") %>%
+  body_add_flextable(ft_J)
+
+# Salvataggio definitivo del file
+print(doc, target = "C:/RTesi/Tabelle_Separate_Diversita_2025.docx")
+print("Le 3 tabelle distinte sono state salvate con successo in Word!")
+
+
+# =====================================================================
+# ---- CREAZIONE GRAFICO ----
+# =====================================================================
+
+library(ggplot2)
+library(patchwork)
+
+# =====================================================================
+# ---- CONFIGURAZIONE TEMA CLASSICO ED ELEGANTE ----
+# =====================================================================
+tema_semplice <- theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0.5, margin = margin(b = 10)),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 11, face = "italic"),
+    axis.text.x = element_text(size = 11, color = "black"),
+    axis.text.y = element_text(size = 10),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    axis.line = element_line(color = "black", size = 0.5),
+    legend.position = "none"
+  )
+
+colori_tratti <- scale_fill_manual(values = c("Monte" = "#66c2a5", "Tagli" = "#fc8d62", "Valle" = "#8da0cb"))
+
+# =====================================================================
+# ---- CREAZIONE DEI 3 PANNELLI CON BARRE E INTERVALLO DI CONFIDENZA ----
+# =====================================================================
+
+# Pannello A: Ricchezza (S)
+p1 <- ggplot(dataset_analisi_1, aes(x = NOME_TRATTO, y = Ricchezza_S, fill = NOME_TRATTO)) +
+  # 1. Barra con la MEDIA
+  stat_summary(fun = mean, geom = "bar", alpha = 0.7, width = 0.5, color = "black", size = 0.3) +
+  # 2. Linea di Errore (Intervallo di Confidenza al 95%)
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.15, color = "black", size = 0.7) +
+  # 3. Punti reali sullo sfondo per far vedere i dati reali
+  geom_jitter(width = 0.1, alpha = 0.3, size = 1.2, color = "black") +
+  labs(title = "A) Ricchezza di Specie (S)", y = "Numero medio di specie") +
+  colori_tratti + tema_semplice
+
+# Pannello B: Shannon (H')
+p2 <- ggplot(dataset_analisi_1, aes(x = NOME_TRATTO, y = Shannon_H, fill = NOME_TRATTO)) +
+  stat_summary(fun = mean, geom = "bar", alpha = 0.7, width = 0.5, color = "black", size = 0.3) +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.15, color = "black", size = 0.7) +
+  geom_jitter(width = 0.1, alpha = 0.3, size = 1.2, color = "black") +
+  labs(title = "B) Indice di Shannon (H')", y = "Valore medio dell'indice") +
+  colori_tratti + tema_semplice
+
+# Pannello C: Evenness (J')
+p3 <- ggplot(dataset_analisi_1, aes(x = NOME_TRATTO, y = Evenness_J, fill = NOME_TRATTO)) +
+  stat_summary(fun = mean, geom = "bar", alpha = 0.7, width = 0.5, color = "black", size = 0.3) +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.15, color = "black", size = 0.7) +
+  geom_jitter(width = 0.1, alpha = 0.3, size = 1.2, color = "black") +
+  labs(title = "C) Evenness di Pielou (J')", y = "Valore medio equitabilità") +
+  colori_tratti + tema_semplice
+
+# =====================================================================
+# ---- UNIONE E SALVATAGGIO ----
+# =====================================================================
+grafico_barre <- p1 + p2 + p3 + 
+  plot_layout(ncol = 3) +
+  plot_annotation(
+    title = "Confronto dei Valori Medi degli Indici di Diversità (2025)",
+    subtitle = "Le barre indicano la media campionaria ± Intervallo di Confidenza (95%). I punti mostrano i singoli segmenti.",
+    theme = theme(
+      plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+      plot.subtitle = element_text(size = 11, face = "italic", hjust = 0.5, color = "dim gray", margin = margin(b = 15))
+    )
+  )
+
+# Mostra a schermo
+print(grafico_barre)
+
+# Esportazione in HD per la tesi
+ggsave(
+  filename = "C:/RTesi/Grafico_Barre_Diversita_2025.png",
+  plot = grafico_barre,
+  width = 14,
+  height = 5.5,
+  dpi = 300
+)
+
+print("Grafico a barre classico salvato correttamente!")
