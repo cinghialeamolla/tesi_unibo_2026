@@ -16,6 +16,9 @@
 #  install.packages("car")
 #  install.packages("MASS")
 #  install.packages("emmeans")
+#  install.packages("patchwork")
+#  install.packages("ggdist")
+#  install.packages("GGally")
 #  install.packages("flextable")
 
 {
@@ -27,6 +30,8 @@
   library(emmeans) # per i confronti post-hoc dei GLM
   library(dplyr)
   library(flextable)
+  library(patchwork)
+  library(ggdist)
   library(officer)
 }
 
