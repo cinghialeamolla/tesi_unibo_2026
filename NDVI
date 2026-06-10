@@ -132,3 +132,4 @@ risultato_Tintorno$NDVI_Buffer_2025 <- ext_T2025[[ncol(ext_T2025)]]
 
 write.csv2(risultato_Tintorno, "valori_ndvi_tagli_buffer_100m.csv", row.names = FALSE)
 
+
