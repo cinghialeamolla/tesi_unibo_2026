@@ -145,7 +145,7 @@ write.csv2(risultato_Tfinale, "valori_ndvi_tagli_32632.csv", row.names = FALSE)
 
 
 # =====================================================================
-# ---- ESTRAZIONE NDVI CON BUFFER DI 200M (Esclusione Acqua) ----
+# ---- ESTRAZIONE NDVI CON BUFFER DI 100M (Esclusione Acqua) ----
 # =====================================================================
 
 setwd("C:/RTesi")
@@ -167,9 +167,9 @@ ndvi_2025_veg <- ifel(ndvi_2025 <= 0.1, NA, ndvi_2025)
 punti_2013 <- project(punti_geo, crs(ndvi_2013_veg))
 punti_2025 <- project(punti_geo, crs(ndvi_2025_veg))
 
-# 5. Creiamo il buffer di 200 metri intorno ai punti
-punti_buffer_2013 <- buffer(punti_2013, width = 200)
-punti_buffer_2025 <- buffer(punti_2025, width = 200)
+# 5. Creiamo il buffer di 100 metri intorno ai punti
+punti_buffer_2013 <- buffer(punti_2013, width = 100)
+punti_buffer_2025 <- buffer(punti_2025, width = 100)
 
 # 6. ESTRAZIONE RISOLVENDO IL CONFLITTO (usiamo terra::extract)
 valori_buffer_2013 <- terra::extract(ndvi_2013_veg, punti_buffer_2013, fun = mean, na.rm = TRUE)
@@ -186,7 +186,7 @@ risultato_intorno <- data.frame(
 risultato_intorno$Delta_NDVI_Buffer <- risultato_intorno$NDVI_Buffer_2025 - risultato_intorno$NDVI_Buffer_2013
 
 # Salviamo il file per Excel
-write.csv2(risultato_intorno, "valori_ndvi_buffer_200m.csv", row.names = FALSE)
+write.csv2(risultato_intorno, "valori_ndvi_buffer_100m.csv", row.names = FALSE)
 
 
 # =====================================================================
@@ -200,7 +200,7 @@ dati_Tpunti <- read.csv("puntiT.csv", sep = ";", dec = ",")
 punti_Tgeo  <- vect(dati_Tpunti, geom = c("est", "nord"), crs = "EPSG:32632")
 
 punti_Tproiettati_2025 <- project(punti_Tgeo, crs(ndvi_T2025_veg))
-punti_Tbuffer_2025     <- buffer(punti_Tproiettati_2025, width = 200)
+punti_Tbuffer_2025     <- buffer(punti_Tproiettati_2025, width = 100)
 
 # Anche qui usiamo terra::extract per sicurezza
 valori_Tbuffer_2025 <- terra::extract(ndvi_T2025_veg, punti_Tbuffer_2025, fun = mean, na.rm = TRUE)
@@ -210,4 +210,80 @@ risultato_Tintorno <- data.frame(
   NDVI_Buffer_2025 = valori_Tbuffer_2025[, 2]
 )
 
-write.csv2(risultato_Tintorno, "valori_ndvi_tagli_buffer_200m.csv", row.names = FALSE)
+write.csv2(risultato_Tintorno, "valori_ndvi_tagli_buffer_100m.csv", row.names = FALSE)
+
+
+# 1. Convertiamo la colonna NDVI in numerica per evitare il blocco del testo
+seg_2025_corretto <- seg_2025 %>%
+  mutate(
+    # Sostituiamo le virgole con i punti (se presenti) e convertiamo in numero
+    NDVI = as.numeric(gsub(",", ".", as.character(NDVI)))
+  )
+
+# 2. Calcolo delle nuove statistiche riassuntive dell'NDVI con buffer
+tabella_ndvi_buffer_2025 <- seg_2025_corretto %>%
+  mutate(NOME_TRATTO = factor(NOME_TRATTO, levels = c("Valle", "Monte", "Tagli"))) %>%
+  group_by(NOME_TRATTO) %>%
+  summarise(
+    N_segmenti = n(),
+    NDVI_medio = mean(NDVI, na.rm = TRUE),
+    NDVI_dev_std = sd(NDVI, na.rm = TRUE),
+    NDVI_min   = min(NDVI, na.rm = TRUE),
+    NDVI_max   = max(NDVI, na.rm = TRUE),
+    .groups    = "drop"
+  ) %>%
+  arrange(NOME_TRATTO)
+
+# 3. Formattazione editoriale pulita per la tesi
+tabella_ndvi_buffer_formattata <- tabella_ndvi_buffer_2025 %>%
+  mutate(
+    `NDVI Buffer (Media ± SD)` = sprintf("%.3f ± %.3f", NDVI_medio, NDVI_dev_std),
+    `Range Buffer (Min - Max)` = sprintf("[%.3f ; %.3f]", NDVI_min, NDVI_max)
+  ) %>%
+  select(
+    `Tratto Fluviale` = NOME_TRATTO,
+    `N° Segmenti`     = N_segmenti,
+    `NDVI Buffer (Media ± SD)`,
+    `Range Buffer (Min - Max)`
+  )
+
+# Mostra la tabella a schermo
+print("--- NUOVA TABELLA NDVI CON BUFFER DA 200M (2025) ---")
+print(tabella_ndvi_buffer_formattata)
+
+### STAMPARE TABELLA
+
+# 1. Creiamo l'oggetto flextable partendo dalla tabella formattata
+ft <- flextable(tabella_ndvi_buffer_formattata) %>%
+  # Adatta automaticamente la larghezza delle colonne al testo
+  autofit() %>%
+  # Allinea al centro il testo di tutte le colonne tranne la prima
+  align(j = 2:4, align = "center", part = "all") %>%
+  align(j = 1, align = "left", part = "all") %>%
+  # Sfondo grigio chiaro per l'intestazione
+  bg(bg = "#F2F2F2", part = "header") %>%
+  # Testo in grassetto per l'intestazione
+  bold(part = "header") %>%
+  # Rende in grassetto la prima colonna (i nomi dei tratti)
+  bold(j = 1, part = "body") %>%
+  # Imposta il font standard da tesi (es. Times New Roman o Arial)
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all") %>%
+  # Aggiunge i bordi orizzontali in stile articolo scientifico (APA style)
+  border_remove() %>%
+  hline_top(border = fp_border(color = "black", width = 1.5), part = "header") %>%
+  hline_bottom(border = fp_border(color = "black", width = 1.5), part = "header") %>%
+  hline_bottom(border = fp_border(color = "black", width = 1.5), part = "body")
+
+# 2. Creiamo un documento Word vuoto e inseriamo la tabella con la didascalia
+doc <- read_docx() %>%
+  # Aggiungiamo il titolo/didascalia della tabella
+  body_add_par("Tabella X.X – Statistiche descrittive dell'Indice di Vegetazione (NDVI) calcolato con buffer da 200m per i tre tratti del fiume Ombrone (Anno 2025).", 
+               style = "Normal") %>%
+  # Inseriamo la tabella
+  body_add_flextable(value = ft)
+
+# 3. Salviamo il file Word nella tua cartella
+print(doc, target = "C:/RTesi/tabella_ndvi_tesi.docx")
+
+print("--- FILE WORD GENERATO CON SUCCESSO IN C:/RTesi/tabella_ndvi_tesi.docx ---")
