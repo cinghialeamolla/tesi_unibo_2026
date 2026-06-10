@@ -139,3 +139,75 @@ risultato_Tfinale <- data.frame(
 
 # Salva il file finale usando il punto e virgola (standard italiano per Excel)
 write.csv2(risultato_Tfinale, "valori_ndvi_tagli_32632.csv", row.names = FALSE)
+
+
+
+
+
+# =====================================================================
+# ---- ESTRAZIONE NDVI CON BUFFER DI 200M (Esclusione Acqua) ----
+# =====================================================================
+
+setwd("C:/RTesi")
+library(terra)
+
+# 1. Carichiamo i raster NDVI originali
+ndvi_2013 <- rast("ndvi_ombrone_2013.tif")
+ndvi_2025 <- rast("ndvi_ombrone_2025.tif")
+
+# 2. Carichiamo i punti GPS dal CSV
+dati_punti <- read.csv("punti.csv", sep = ";", dec = ",")
+punti_geo  <- vect(dati_punti, geom = c("est", "nord"), crs = "EPSG:32632")
+
+# 3. Mascheriamo l'acqua nei raster
+ndvi_2013_veg <- ifel(ndvi_2013 <= 0.1, NA, ndvi_2013)
+ndvi_2025_veg <- ifel(ndvi_2025 <= 0.1, NA, ndvi_2025)
+
+# 4. Allineamento dei sistemi di riferimento
+punti_2013 <- project(punti_geo, crs(ndvi_2013_veg))
+punti_2025 <- project(punti_geo, crs(ndvi_2025_veg))
+
+# 5. Creiamo il buffer di 200 metri intorno ai punti
+punti_buffer_2013 <- buffer(punti_2013, width = 200)
+punti_buffer_2025 <- buffer(punti_2025, width = 200)
+
+# 6. ESTRAZIONE RISOLVENDO IL CONFLITTO (usiamo terra::extract)
+valori_buffer_2013 <- terra::extract(ndvi_2013_veg, punti_buffer_2013, fun = mean, na.rm = TRUE)
+valori_buffer_2025 <- terra::extract(ndvi_2025_veg, punti_buffer_2025, fun = mean, na.rm = TRUE)
+
+# 7. Creiamo il report finale per i punti generali
+risultato_intorno <- data.frame(
+  Dati_Originali = dati_punti,
+  NDVI_Buffer_2013 = valori_buffer_2013[, 2],
+  NDVI_Buffer_2025 = valori_buffer_2025[, 2]
+)
+
+# Calcoliamo il Delta NDVI spaziale
+risultato_intorno$Delta_NDVI_Buffer <- risultato_intorno$NDVI_Buffer_2025 - risultato_intorno$NDVI_Buffer_2013
+
+# Salviamo il file per Excel
+write.csv2(risultato_intorno, "valori_ndvi_buffer_200m.csv", row.names = FALSE)
+
+
+# =====================================================================
+# ---- REPLICA DELLA PROCEDURA PER IL FILE DEI TAGLI (puntiT) ----
+# =====================================================================
+
+ndvi_T2025 <- rast("ndvi_tagli_2025.tif")
+ndvi_T2025_veg <- ifel(ndvi_T2025 <= 0.1, NA, ndvi_T2025)
+
+dati_Tpunti <- read.csv("puntiT.csv", sep = ";", dec = ",")
+punti_Tgeo  <- vect(dati_Tpunti, geom = c("est", "nord"), crs = "EPSG:32632")
+
+punti_Tproiettati_2025 <- project(punti_Tgeo, crs(ndvi_T2025_veg))
+punti_Tbuffer_2025     <- buffer(punti_Tproiettati_2025, width = 200)
+
+# Anche qui usiamo terra::extract per sicurezza
+valori_Tbuffer_2025 <- terra::extract(ndvi_T2025_veg, punti_Tbuffer_2025, fun = mean, na.rm = TRUE)
+
+risultato_Tintorno <- data.frame(
+  Dati_Originali = dati_Tpunti,
+  NDVI_Buffer_2025 = valori_Tbuffer_2025[, 2]
+)
+
+write.csv2(risultato_Tintorno, "valori_ndvi_tagli_buffer_200m.csv", row.names = FALSE)
