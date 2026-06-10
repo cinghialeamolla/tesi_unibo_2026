@@ -193,150 +193,145 @@ ggplot(dati_lunghi, aes(x = NOME_TRATTO, y = media, group = 1)) +
 
 ggsave("grafico_biodiversita_completo.png", width = 11, height = 5, dpi = 300)
 
-
 ## ==============================================================================
 ## ---- ANOVA: DIFFERENZE TRA TRATTI DI FIUME ----
 ## ==============================================================================
 
-
 # ANOVA sulla Ricchezza di Specie rispetto al Tratto
-{
-  anova_S <- aov(Ricchezza_S ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
-  anova_S
 
-# OUTPUT ANOVA 
-#   aov(formula = Ricchezza_S ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
-# Terms:
-#                NOME_TRATTO     NDVI Residuals
-# Sum of Squares      17.0260  35.0245  509.3341
+
+anova_S <- aov(Ricchezza_S ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
+anova_S
+
+# OUTPUT: 2 out of 80 effects not estimable
+
+# Ho controllato la struttura delle variabili
+str(dataset_analisi_1[, c("Ricchezza_S", "NOME_TRATTO", "NDVI")])
+
+
+#  Ho pulito e convertito i dati nel dataset finale
+dataset_analisi_1 <- dataset_analisi_1 %>%
+  mutate(
+    # Sostituisce la virgola con il punto e trasforma in numero reale
+    NDVI = as.numeric(gsub(",", ".", NDVI)),
+    # Trasforma il tratto in fattore (Monte, Tagli, Valle)
+    NOME_TRATTO = as.factor(NOME_TRATTO)
+  )
+
+# Ho rilanciato il comando:
+anova_S <- aov(Ricchezza_S ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
+anova_S
+
+#   OUTPUT:         NOME_TRATTO     NDVI Residuals
+#  Sum of Squares      17.0260   4.9277  539.4308
 # Deg. of Freedom           2        1        74
-# Residual standard error: 2.623527
-# Estimated effects may be unbalanced
-# l'ANOVA sembra significativa per l'NDVI
+# Residual standard error: 2.699927
 
-  # verifica degli assunti dell'ANOVA: importante, da fare prima di guardare i risultati!
-  # perché se gli assunti non sono rispettati dobbiamo passare al blocco di analisi successivo
-  shapiro.test(residuals(anova_S)) # p-value = 0.3025, è superiore a 0,05, significa che è i residui sono normali?
+# l'ANOVA non sembra significativa
 
-# OUTPUT - Shapiro-Wilk normality test
-# data:  residuals(anova_S)
-# W = 0.98116, p-value = 0.3025
+# verifica degli assunti dell'ANOVA: importante, da fare prima di guardare i risultati!
+# perché se gli assunti non sono rispettati dobbiamo passare al blocco di analisi successivo
+shapiro.test(residuals(anova_S)) # p-value = 0.4943, è superiore a 0,05, significa che è i residui sono normali
 
-  levene_S <- leveneTest(Ricchezza_S ~ NOME_TRATTO, data = dataset_analisi_1)
-  print(levene_S) # p-value=0.9138 > p-vaue 0,05; quindi le varianze dovrebbero essere omogenee
+levene_S <- leveneTest(Ricchezza_S ~ NOME_TRATTO, data = dataset_analisi_1)
+print(levene_S) # p-value=0.9138 > p-vaue 0,05; quindi le varianze dovrebbero essere omogenee
 
-# OUTPUT - Levene's Test for Homogeneity of Variance (center = median)
-#       Df F value Pr(>F)
-# group  2  0.0902 0.9138
-# 75 
-
-# I due test sopra mi sembrano ok, però l'ANOVA è significativa solo considerando l'NDVI,
+# I due test sopra mi sembrano ok, però l'ANOVA non è significativa
 # ma se faccio il test post-hoc di Tukey per vedere quali tratti differiscono, mi dà un errore sulla gestione dell'NDVI
- 
-  # print("--- TEST POST-HOC TUKEY RICCHEZZA (S) ---")
-  # print(TukeyHSD(anova_S))
-  # plot(TukeyHSD(anova_S))
 
-  # OUTPUT: Errore in rep.int(n, length(means)) : 
-  #   tipo 'NULL' non implementato in 'rep3'
-  # In aggiunta: Messaggio di avvertimento:
-  #  In replications(paste("~", xx), data = mf) : non-fattori ignorati: NDVI
+# print("--- TEST POST-HOC TUKEY RICCHEZZA (S) ---")
+# print(TukeyHSD(anova_S))
+# plot(TukeyHSD(anova_S))
+# OUTPUT: non-fattori ignorati: NDVI
 
 
 # Ho provato a fare L'ANOVA escludendo NDVI, 
-# ma le differenze tra i tratti non erano significative
-# (il p-value era sempre maggiore di 0,05):
+print("=== ANOVA RICCHEZZA (S) SENZA NDVI ===")
+anova_S_semplice <- aov(Ricchezza_S ~ NOME_TRATTO, data = dataset_analisi_1)
+print(summary(anova_S_semplice))
 
-# $NOME_TRATTO# 
-# diff       lwr       upr     p adj
-# Tagli-Monte -1.1600000 -2.982037 0.6620368 0.2863504
-# Valle-Monte -0.4728571 -2.245418 1.2997033 0.7997488
-# Valle-Tagli  0.6871429 -1.085418 2.4597033 0.6250765
+# Verifica delle assunzioni (normalità dei residui e omogeneità varianze)
+print(shapiro.test(residuals(anova_S_semplice)))  #p-value = 0.2136 > 0,05, i residui sono normali
+print(leveneTest(Ricchezza_S ~ NOME_TRATTO, data = dataset_analisi_1)) # p-value=0.9138 > p-vaue 0,05;
+# le varianze dovrebbero essere omogenee
+
+# TukeyHSD
+print("--- TEST POST-HOC TUKEY RICCHEZZA (S) ---")
+print(TukeyHSD(anova_S_semplice))
+
+
+# Tagli-Monte:  p-value = 0.2863504 > 0,05
+# Valle-Monte:  p-value = 0.7997488 > 0,05
+# Valle-Tagli:  p-value = 0.6250765 > 0,05
+
+# Il p-value è maggiore di 0.05: non ci sono differenze statisticamente significative 
+# nella Ricchezza di specie (S) tra i tre tratti (Monte, Tagli, Valle). 
+# I tre ambienti ospitano mediamente lo stesso numero di specie per segmento
 
 # Allora ho provato con l'ANCOVA
-  print("--- TABELLA ANCOVA ---")
-  print(summary(anova_S))
-  print("--- TEST POST-HOC CON EMMEANS RICCHEZZA (S) ---")
+print("--- TABELLA ANCOVA ---")
+print(summary(anova_S))
+print("--- TEST POST-HOC CON EMMEANS RICCHEZZA (S) ---")
 
-  # Ho calcolato le medie marginali stimate per il Tratto
-  medie_em <- emmeans(anova_S, ~ NOME_TRATTO)
-  
-  # Ho provato il confronto a coppie (in sostituzione a Tukey)
-  confronti <- pairs(medie_em, adjust = "tukey")
-  print(confronti)
- 
-# OUTPUT ANCOVA: contrast      estimate    SE df t.ratio p.value
-# Monte - Tagli   3.8714 1.410 74   2.741  0.0207   # p-value < 0,05 -> differenze significative
-# Monte - Valle   0.0883 0.742 74   0.119  0.9922   # p-value > 0,05 -> differenze NON significative
-# Tagli - Valle  -3.7831 1.550 74  -2.440  0.0446   # p-value < 0,05 -> differenze significative
+# Ho calcolato le medie marginali stimate per il Tratto
+medie_em <- emmeans(anova_S, ~ NOME_TRATTO)
 
-# Quindi per il codice Post-Hoc il tratto a tagli ha effettivamente una ricchezza specifica inferiore agli altri due tratti
-}
+# Ho provato il confronto a coppie (in sostituzione a Tukey)
+confronti <- pairs(medie_em, adjust = "tukey")
+print(confronti)
+
+# Tagli-Monte:  p-value = 0.5080 > 0,05
+# Valle-Monte:  p-value = 0.9997 > 0,05
+# Valle-Tagli:  p-value = 0.4933 > 0,05
+
+# Il p-value è 0.414 (maggiore di 0.05). 
+# L'indice NDVI non ha una relazione statisticamente significativa con S
+
 
 ## HO RIPETUTO PER GLI ALTRI INDICI DI DIVERSITA'
 
 # ANOVA sull'Indice di Shannon includendo l'NDVI come covariata (ANCOVA)
-{
+
   anova_H <- aov(Shannon_H ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
-
-  shapiro.test(residuals(anova_H)) # p-value = 0.1585, è superiore a 0,05, significa che è i residui sono normali?
-
+  anova_H
+  
+  shapiro.test(residuals(anova_H)) # p-value = 0.06082, è superiore a 0,05, residui sono normali
+  
   levene_H <- leveneTest(Shannon_H ~ NOME_TRATTO, data = dataset_analisi_1)
-  print(levene_H) #p-value= 0.3517 > p-vaue 0,05; quindi le varianze dovrebbero essere omogenee
-
-
+  print(levene_H) # p-value= 0.3517 > p-vaue 0,05; le varianze dovrebbero essere omogenee
+  
+  
   print("--- RISULTATI ANCOVA SHANNON (H') CON NDVI ---")
   print(summary(anova_H))
-
-# Anche qui ho provato il test post - hoc
+  
+  # Anche qui ho provato il test post - hoc
   print("--- TEST POST-HOC CON EMMEANS SHANNON (H) ---")
   H_medie_em <- emmeans(anova_H, ~ NOME_TRATTO)
   confronti_H <- pairs(H_medie_em, adjust = "tukey")
   print(confronti_H)
 
-  # OUTPUT
- # contrast      estimate    SE df t.ratio p.value
- # Monte - Tagli   0.3404 0.139 74   2.448  0.0437   # p-value < 0,05 -> differenze significative
- # Monte - Valle  -0.0357 0.073 74  -0.490  0.8765   # p-value > 0,05 -> differenze NON significative
- # Tagli - Valle  -0.3761 0.153 74  -2.464  0.0420   # p-value < 0,05 -> differenze significative
+  # Tagli-Monte:  p-value = 0.6331 > 0,05
+  # Valle-Monte:  p-value = 0.8966 > 0,05
+  # Valle-Tagli:  p-value = 0.3059 > 0,05
+  
+  # Il p-value è sempre maggiore di 0.05.
+  # L'indice NDVI non ha una relazione statisticamente significativa con Shannon (H)
 
-# Anche per Shannon il tratto a tagli ha delle differenze significative rispetto agli altri due
-}
 
-# ANOVA sull'Indice di EveNness includendo l'NDVI come covariata (ANCOVA)
-{
+
+  # ANOVA sull'Indice di EveNness includendo l'NDVI come covariata (ANCOVA)
+  
   anova_J <- aov(Evenness_J ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
   print("--- RISULTATI ANCOVA EVEnNESS (J') CON NDVI ---")
   print(summary(anova_J))
-
- # OUTPUT - Df  Sum Sq   Mean Sq F value Pr(>F)
- # NOME_TRATTO  2 0.00496 0.0024818   1.346  0.267
- # NDVI         1 0.00046 0.0004596   0.249  0.619
- # Residuals   74 0.13648 0.0018443 
-
-# Qui nemmeno l'NDVI risulta significativo (il p- vaue è sempre superiore a 0,05)
-
-  shapiro.test(residuals(anova_J)) # p-value = 1.196e-09, è MOLTO inferiore a 0,05, i residui non sono normali, suppongo
-
+  
+  shapiro.test(residuals(anova_J)) # p-value = 1.498e-09, è MOLTO inferiore a 0,05, i residui non sono normali, suppongo
+  
   levene_J <- leveneTest(Evenness_J ~ NOME_TRATTO, data = dataset_analisi_1)
   print(levene_J) #p-value = 0.2678 > p-vaue 0,05; quindi le varianze dovrebbero essere omogenee
-
-# Per curiosità, ho comunque provato il test post - hoc, dove però non mi dà effettivamente differenze significative
-  print("--- TEST POST-HOC CON EMMEANS EVERNESS (J) ---")
-  J_medie_em <- emmeans(anova_J, ~ NOME_TRATTO)
-  confronti_J <- pairs(J_medie_em, adjust = "tukey")
-  print(confronti_J)
-
-# OUTPUT - contrast      estimate     SE df t.ratio p.value
- # Monte - Tagli  0.00819 0.0231 74   0.354  0.9333    # p-value > 0,05 -> differenze NON significative
- # Monte - Valle -0.01878 0.0121 74  -1.547  0.2752    # p-value > 0,05 -> differenze NON significative
- # Tagli - Valle -0.02697 0.0254 74  -1.063  0.5402    # p-value > 0,05 -> differenze NON significative
-
-# Effettivamente, qui non ci sono differenze significative in nessuno dei tratti
-}
-
-
-
+  
+  # Dato il problema con Shapiro non sono andata avanti, ma ho provato i modelli lineari
+  
 
 # ==============================================================================
 # ATTENZIONE!!
@@ -353,94 +348,89 @@ ggsave("grafico_biodiversita_completo.png", width = 11, height = 5, dpi = 300)
 # ==============================================================================
 
 ## ==============================================================================
-## ---- GLM: RICCHEZZA ----
-## ==============================================================================
-
-# Modello con Tratto e NDVI come predittori - passando al GLM,
-# possiamo già inserire altre variabili esplicative come l'NDVI
-# Ho comunque provato a farlo
-{
-  glm_poisson <- glm(
-    Ricchezza_S ~ NOME_TRATTO + NDVI,
-    family = poisson(link = "log"),
-    data = dataset_analisi_1
-  )
-
-  ### ---- VERIFICA DEGLI ASSUNTI: SOVRADISPERSIONE (Overdispersion) e SOTTODISPERSIONE (Underdispersion) -----
-  # Nei dati di Poisson, la varianza dovrebbe essere uguale alla media.
-  # Se la varianza è molto più alta, il modello sottostima gli errori (p-value falsamente troppo significativi).
-  # Un modo rapido per controllarla è dividere la Residual Deviance per i Gradi di Libertà (Df):
-
-  residual_deviance <- glm_poisson$deviance
-  df_residual <- glm_poisson$df.residual
-  ratio_dispersione <- residual_deviance / df_residual
-}
-
-cat("\nRatio di dispersione:", ratio_dispersione, "\n")
-# REGOLA: Se il ratio è vicino a 1 (es. tra 0.7 e 1.3), la Poisson va bene.
-# Se è decisamente > 1.3, c'è sovradispersione!
-# Se è inferiore a 0.7, c'è sottodispersione (raro)
-
-# OUTPUT - Ratio di dispersione: 0.6058564 
-# Direi che siamo nel secondo caso
-
+  ## ---- GLM: RICCHEZZA ----
+  ## ==============================================================================
+  
+  # Modello con Tratto e NDVI come predittori - passando al GLM,
+  # possiamo già inserire altre variabili esplicative come l'NDVI
+  # Ho comunque provato a farlo
+  {
+    glm_poisson <- glm(
+      Ricchezza_S ~ NOME_TRATTO + NDVI,
+      family = poisson(link = "log"),
+      data = dataset_analisi_1
+    )
+    
+    ### ---- VERIFICA DEGLI ASSUNTI: SOVRADISPERSIONE (Overdispersion) e SOTTODISPERSIONE (Underdispersion) -----
+    # Nei dati di Poisson, la varianza dovrebbe essere uguale alla media.
+    # Se la varianza è molto più alta, il modello sottostima gli errori (p-value falsamente troppo significativi).
+    # Un modo rapido per controllarla è dividere la Residual Deviance per i Gradi di Libertà (Df):
+    
+    residual_deviance <- glm_poisson$deviance
+    df_residual <- glm_poisson$df.residual
+    ratio_dispersione <- residual_deviance / df_residual
+  }
+  
+  cat("\nRatio di dispersione:", ratio_dispersione, "\n")
+  # REGOLA: Se il ratio è vicino a 1 (es. tra 0.7 e 1.3), la Poisson va bene.
+  # Se è decisamente > 1.3, c'è sovradispersione!
+  # Se è inferiore a 0.7, c'è sottodispersione (raro)
+  
+  # OUTPUT - Ratio di dispersione: 0.6428572 
+  # Direi che siamo nel secondo caso
+  
 ### ================================================================================================
 ### ---- SELEZIONE AUTOMATICA DEL MODELLO CHE TIENE CONTO DI EVENTUALI PROBLEMI DI DISPERSIONE -----
 ### ================================================================================================
-{
-  if (ratio_dispersione > 1.3) {
-    # --- CASO A: SOVRADISPERSIONE -> NEGATIVE BINOMIAL ---
-    print("--- RILEVATA SOVRADISPERSIONE: Eseguo il GLM Binomiale Negativa ---")
-
-    glm_ricchezza_finale <- glm.nb(
-      Ricchezza_S ~ NOME_TRATTO + NDVI,
-      data = dataset_analisi_1
-    )
-  } else if (ratio_dispersione < 0.7) {
-    # --- CASO B: SOTTODISPERSIONE -> QUASIPOISSON ---
-    print(
-      "--- RILEVATA SOTTODISPERSIONE: Uso Quasipoisson per correggere gli errori ---"
-    )
-
-    glm_ricchezza_finale <- glm(
-      Ricchezza_S ~ NOME_TRATTO + NDVI,
-      family = quasipoisson(link = "log"),
-      data = dataset_analisi_1
-    )
-  } else {
-    # --- CASO C: DISPERSIONE NELLA NORMA -> POISSON ---
-    print(
-      "--- DISPERSIONE NELLA NORMA: Procedo con il GLM Poisson classico ---"
-    )
-    glm_ricchezza_finale <- glm_poisson
+  {
+    if (ratio_dispersione > 1.3) {
+# --- CASO A: SOVRADISPERSIONE -> NEGATIVE BINOMIAL ---
+      print("--- RILEVATA SOVRADISPERSIONE: Eseguo il GLM Binomiale Negativa ---")
+      
+      glm_ricchezza_finale <- glm.nb(
+        Ricchezza_S ~ NOME_TRATTO + NDVI,
+        data = dataset_analisi_1
+      )
+    } else if (ratio_dispersione < 0.7) {
+# --- CASO B: SOTTODISPERSIONE -> QUASIPOISSON ---
+      print(
+        "--- RILEVATA SOTTODISPERSIONE: Uso Quasipoisson per correggere gli errori ---"
+      )
+      
+      glm_ricchezza_finale <- glm(
+        Ricchezza_S ~ NOME_TRATTO + NDVI,
+        family = quasipoisson(link = "log"),
+        data = dataset_analisi_1
+      )
+    } else {
+# --- CASO C: DISPERSIONE NELLA NORMA -> POISSON ---
+      print(
+        "--- DISPERSIONE NELLA NORMA: Procedo con il GLM Poisson classico ---"
+      )
+      glm_ricchezza_finale <- glm_poisson
+    }
   }
-}
 # OUTPUT - [1] "--- RILEVATA SOTTODISPERSIONE: Uso Quasipoisson per correggere gli errori ---"
-
-print("--- SUMMARY DEL GLM ---")
-summary(glm_ricchezza_finale)
-
-
+  
+  print("--- SUMMARY DEL GLM ---")
+  summary(glm_ricchezza_finale)
+  
+  
 ### ================================================================================================
 ### ---- TEST POST-HOC PER IL GLM (Confronti a coppie tra Tratti) -----
 ### ================================================================================================
 # Nel GLM non si usa TukeyHSD(). Usiamo il pacchetto 'emmeans' per i confronti a coppie
-
-print("--- CONFRONTI POST-HOC TRA TRATTI (EMMEANS) ---")
+  
+  print("--- CONFRONTI POST-HOC TRA TRATTI (EMMEANS) ---")
 # type = "response" ci restituisce i valori già trasformati dalla scala logaritmica a quella reale dei conteggi
-confronti_tratti <- emmeans(
-  glm_ricchezza_finale,
-  specs = pairwise ~ NOME_TRATTO,
-  type = "response"
-)
-print(confronti_tratti$contrasts)
+  confronti_tratti <- emmeans(
+    glm_ricchezza_finale,
+    specs = pairwise ~ NOME_TRATTO,
+    type = "response"
+  )
+  print(confronti_tratti$contrasts)
 
- # OUTPUT - contrast      ratio     SE  df null z.ratio p.value
-#          Monte / Tagli 1.421 0.1820 Inf    1   2.740  0.0169     # p-value < 0,05 -> differenze significative
-#          Monte / Valle 1.006 0.0639 Inf    1   0.091  0.9955     # p-value > 0,05 -> differenze NON significative
-#          Tagli / Valle 0.708 0.0994 Inf    1  -2.461  0.0369     # p-value < 0,05 -> differenze significative
-
-# Il risultato riprende quanto venuto fuori dall'ANCOVA: ha senso fare anche questa?
+# Il p-value è leggermente inferiore solo per Tagli-valle, ma comunque troppo vicino a 0,05
 
 ## ==============================================================================
 ## ---- LM: SHANNON ----
@@ -496,86 +486,52 @@ print(confronti_tratti$contrasts)
 # Anche qui i risultati riprendono quanto emerso dalla stessa ANCOVA
 
 
-## ==============================================================================
-## ---- GLM: PIELOU ----
-## ==============================================================================
-{
-  print("--- REGRESSIONE BETA PER EVENNESS DI PIELOU (J') ---")
-# install.packages("betareg")
-library(betareg)
-
-  # Nota: la regressione Beta richiede che i valori siano strettamente COMPRESI tra 0 e 1.
-  # Se ci sono valori esattamente uguali a 1 (es. segmenti con una sola specie dove J è non calcolabile o forzato a 1),
-  # vanno rimossi o trasformati leggermente.
-  
-  dataset_beta <- dataset_analisi_1 %>%
-    filter(Evenness_J > 0 & Evenness_J < 1)
-
-  # Costruzione del modello Beta
-  modello_beta_j <- betareg(
-    Evenness_J ~ NOME_TRATTO + NDVI,
-    data = dataset_beta
-  )
+### ==============================================================================
+### ---- GLM: PIELOU ----
+### ==============================================================================
+  {
+    print("--- REGRESSIONE BETA PER EVENNESS DI PIELOU (J') ---")
+    # install.packages("betareg")
+    library(betareg)
+    
+    # Nota: la regressione Beta richiede che i valori siano strettamente COMPRESI tra 0 e 1.
+    # Se ci sono valori esattamente uguali a 1 (es. segmenti con una sola specie dove J è non calcolabile o forzato a 1),
+    # vanno rimossi o trasformati leggermente.
+    
+    dataset_beta <- dataset_analisi_1 %>%
+      filter(Evenness_J > 0 & Evenness_J < 1)
+    
+    # Costruzione del modello Beta
+    modello_beta_j <- betareg(
+      Evenness_J ~ NOME_TRATTO + NDVI,
+      data = dataset_beta
+    )
   }
   summary(modello_beta_j)
-
-  ### ================================================================================================
-  ### ---- TEST POST-HOC PER IL GLM (Confronti a coppie tra Tratti) -----
-  ### ================================================================================================
+  
+  # TRATTOValle: p-value = 0.0548. Si trova appena sopra la soglia
+  # Tutti gli altri p-value sono sopra
+  
+### ================================================================================================
+### ---- TEST POST-HOC PER IL GLM (Confronti a coppie tra Tratti) -----
+### ================================================================================================
+  {
   posthoc_pielou <- emmeans(
     modello_beta_j,
     specs = pairwise ~ NOME_TRATTO,
     type = "response"
   )
   print(posthoc_pielou$contrasts)
-}
+  }
 
-# qui la parte strana è Monte - Valle p- value = 0.0554
-# però è comunque sopra 0,05
+# Non sembrano esserci differenze significative
+  
+  
 
 
-  ### ================================================================================================
-  ### ---- SPERIMENTAZIONI PAM -----
-  ### ================================================================================================
+### ================================================================================================
+### ---- SPERIMENTAZIONI PAM -----
+### ================================================================================================
 
-library(flextable)
-library(officer)
-library(dplyr)
 
-# 1. Creazione manuale del dataset con i dati ufficiali dei tuoi output
-dati_tabella <- tibble(
-  `Indice di Biodiversità` = c("Ricchezza (S)", "", "Shannon (H')", "", "Evenness (J')", ""),
-  `Variabile Esplicativa`  = c("Tratto (NOME_TRATTO)", "Copertura (NDVI)", 
-                               "Tratto (NOME_TRATTO)", "Copertura (NDVI)", 
-                               "Tratto (NOME_TRATTO)", "Copertura (NDVI)"),
-  `Statistica (F / Chisq)` = c("F = 3.76", "F = 5.09", 
-                               "F = 3.82", "F = 5.12", # Inserisci qui i valori F esatti di Shannon se leggermente diversi
-                               "Chisq = 1.98", "Chisq = 0.50"), # Valori ricavati dal summary/Anova Beta
-  `Gradi di Libertà (Df)`  = c("2, 74", "1, 74", "2, 74", "1, 74", "2", "1"),
-  `Valore p`               = c(0.0279, 0.0270, 0.0296, 0.0270, 0.4550, 0.4810)
-)
-
-# 2. Formattazione con flextable per Word
-tabella_word <- flextable(dati_tabella) %>%
-  set_header_labels(
-    `Indice di Biodiversità` = "Indice di Biodiversità",
-    `Variabile Esplicativa`  = "Variabile Esplicativa",
-    `Statistica (F / Chisq)` = "Statistica",
-    `Gradi di Libertà (Df)`  = "Df",
-    `Valore p`               = "p-value"
-  ) %>%
-  # Evidenzia i p-value significativi e formatta la notazione
-  colformat_double(j = "Valore p", digits = 4) %>%
-  bold(i = ~ `Valore p` < 0.05, j = "Valore p") %>%
-  # Stile accademico (linee orizzontali pulite)
-  theme_booktabs() %>%
-  autofit() %>%
-  # Unisce le celle verticali dell'indice per un look più pulito
-  merge_v(j = "Indice di Biodiversità") %>%
-  fix_border_issues()
-
-# 3. Salva direttamente in un documento Word temporaneo per copiarla
-read_docx() %>%
-  body_add_flextable(tabella_word) %>%
-  print(target = "C:/RTesi/tabella_modelli_tesi.docx")
 
