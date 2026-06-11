@@ -78,6 +78,57 @@ setwd("C:/RTesi")
     column_to_rownames("ID_SEGMENTO")
 }
 
+
+# =====================================================================
+# ---- TABELLA NDVI PER TRATTO (2025) ----
+# =====================================================================
+
+# Trasformo la colonna NDVI da "carattere" a "numerica" prima del calcolo
+seg_2025_corretto <- seg_2025 %>%
+  mutate(NDVI = as.numeric(as.character(NDVI))) 
+
+# Ricalcolo dle statistiche descrittive
+tabella_ndvi_dati <- seg_2025_corretto %>%
+  group_by(NOME_TRATTO) %>%
+  summarise(
+    Numero_Segmenti = n(),
+    NDVI_Medio      = mean(NDVI, na.rm = TRUE),
+    Deviazione_Std  = sd(NDVI, na.rm = TRUE),
+    Minimo          = min(NDVI, na.rm = TRUE),
+    Massimo         = max(NDVI, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Creo la tabella risolvendo il conflitto di 'align'
+# Uso flextable::align per dire a R di ignorare il pacchetto terra in questo blocco (altrimenti continua a dari errori di conflitto)
+tabella_completa <- flextable(tabella_ndvi_dati) %>%
+  set_header_labels(
+    NOME_TRATTO     = "Tratto di Fiume",
+    Numero_Segmenti = "N° Segmenti",
+    NDVI_Medio      = "NDVI Medio",
+    Deviazione_Std  = "Deviazione Standard",
+    Minimo          = "Min",
+    Massimo         = "Max"
+  ) %>%
+  colformat_double(digits = 3, decimal.mark = ",") %>%
+  colformat_int(j = "Numero_Segmenti") %>%
+  theme_booktabs() %>%                
+  autofit() %>%                       
+  bold(part = "header") %>%           
+  flextable::align(align = "center", part = "all") %>% # Risolve il bug
+  flextable::align(j = "NOME_TRATTO", align = "left", part = "all") # Risolve il bug
+
+
+# La esporto in word
+library(officer)
+doc_ndvi <- read_docx()
+doc_ndvi <- body_add_par(doc_ndvi, "Tabella: Statistiche descrittive dell'NDVI nei tre tratti monitorati (Anno 2025)", style = "heading 2")
+doc_ndvi <- body_add_flextable(doc_ndvi, value = tabella_completa)
+
+print(doc_ndvi, target = "C:/RTesi/tabella_medie_ndvi_2025.docx")
+print("--- TABELLA WORD GENERATA CON SUCCESSO ---")
+
+
 ## =====================================================================
 ## ---- CALCOLO INDICI DIVERSITA' e TABELLA RIASSUNTIVA ----
 ## =====================================================================
@@ -701,3 +752,303 @@ ggsave(
 )
 
 print("Grafico a barre classico salvato correttamente!")
+
+
+
+
+# =====================================================================
+  # ---- PERMANOVA ----
+  # =====================================================================
+  
+  library(vegan)
+  
+  # Ordino i metadati ambientali per farli combaciare perfettamente con le righe della matrice
+  metadati_permanova <- dataset_analisi_1 %>%
+    filter(ID_SEGMENTO %in% rownames(matrice_comunita)) %>%
+    arrange(match(ID_SEGMENTO, rownames(matrice_comunita)))
+  
+  # Eseguiamo la PERMANOVA (Distanza di Bray-Curtis sui conteggi)
+  permanova_2025 <- adonis2(matrice_comunita ~ NOME_TRATTO, data = metadati_permanova, method = "bray")
+  print(permanova_2025)
+  
+  # =====================================================================
+  # ---- CONFRONTI POST-HOC DELLA PERMANOVA (2025) ----
+  # =====================================================================
+  
+  # install.packages("devtools")
+  # devtools::install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
+  
+  library(pairwiseAdonis)
+  
+  # Ordiniamo e verifichiamo i metadati per farli combaciare con la matrice comunità
+  metadati_permanova <- dataset_analisi_1 %>%
+    filter(ID_SEGMENTO %in% rownames(matrice_comunita)) %>%
+    arrange(match(ID_SEGMENTO, rownames(matrice_comunita)))
+  
+  # 2. ESECUZIONE DEL TEST A COPPIE
+  # Usiamo la distanza di Bray-Curtis sui conteggi biologici
+  # La correzione "bonferroni" o "holm" serve per blindare i p-value
+  post_hoc_permanova <- pairwise.adonis2(
+    matrice_comunita ~ NOME_TRATTO, 
+    data = metadati_permanova,
+    method = "bray",
+    p.adjust.m = "bonferroni" # Correzione rigorosa per confronti multipli
+  )
+  
+  # 3. VISUALIZZAZIONE DEI RISULTATI
+  # Questo comando ti mostrerà i p-value e l'R2 per ciascuna coppia di tratti
+  print(post_hoc_permanova)
+
+
+  # =====================================================================
+  # ---- ANOVA SULLE GUILDS----
+  # =====================================================================
+  
+  
+  # Calcolo la matrice comunità filtrando solo le specie "riparian - forestry  nesters", quelle che nidificano nella vegetazione arborea
+  specie_forestali<- specie %>%
+    filter(ID_SEGMENTO %in% seg_2025$ID_SEGMENTO, GUILD == "riparian - forestry  nesters") %>% # Verifica come è scritto nel foglio
+    group_by(ID_SEGMENTO, SPECIE) %>%
+    summarise(CONTEGGIO_TOT = sum(CONTEGGIO), .groups = "drop")
+  
+  matrice_specialisti <- specie_forestali %>%
+    pivot_wider(names_from = SPECIE, values_from = CONTEGGIO_TOT, values_fill = 0) %>%
+    column_to_rownames("ID_SEGMENTO")
+  
+  # Calcolo la ricchezza degli specialisti
+  indici_specialisti <- tibble(
+    ID_SEGMENTO = rownames(matrice_specialisti),
+    S_Specialisti = vegan::specnumber(matrice_specialisti)
+  )
+  
+  # Unisco al dataset e lancio l'ANOVA
+  dataset_specialisti <- dataset_analisi_1 %>%
+    left_join(indici_specialisti, by = "ID_SEGMENTO") %>%
+    mutate(S_Specialisti = replace_na(S_Specialisti, 0))
+  
+  anova_specialisti <- aov(S_Specialisti ~ NOME_TRATTO + NDVI, data = dataset_specialisti)
+  summary(anova_specialisti)
+  
+  # Calcolo le medie marginali stimate per gli specialisti forestali nei tre tratti
+  library(emmeans)
+  medie_specialisti <- emmeans(anova_specialisti, ~ NOME_TRATTO)
+  
+  # Mostro le medie (depurate dall'NDVI)
+  print("=== MEDIE STIMATE DEGLI SPECIALISTI PER TRATTO ===")
+  print(medie_specialisti)
+  
+  # Eseguo il confronto a coppie con correzione di Tukey
+  print("=== CONFRONTI POST-HOC SPECIALISTI (TUKEY) ===")
+  print(pairs(medie_specialisti, adjust = "tukey"))
+
+#      OUTPUT
+ # contrast       estimate    SE df t.ratio p.value
+ # Monte - Tagli    1.437 0.557 74   2.581  0.0314
+ # Monte - Valle    1.889 0.627 74   3.012  0.0098
+ # Tagli - Valle    0.452 0.532 74   0.849  0.6737
+
+# P value adjustment: tukey method for comparing a family of 3 estimates 
+  
+  
+  
+  # =====================================================================
+  # ---- GRAFICO ANALISI DELLE COORDINATE PRINCIPALI (PCoA) ----
+  # =====================================================================
+  library(vegan)
+  library(ggplot2)
+  
+  #  Calcolo la matrice di distanza biologica di Bray-Curtis
+  dist_bray <- vegdist(matrice_comunita, method = "bray")
+  
+  # Eseguo la PCoA (MDS metrico)
+  pcoa_risultato <- cmdscale(dist_bray, k = 2, eig = TRUE)
+  
+  # Calcolo la percentuale di varianza spiegata dai primi due assi
+  var_spiegata <- round(100 * pcoa_risultato$eig / sum(pcoa_risultato$eig), 1)
+  asse1_var <- var_spiegata[1]
+  asse2_var <- var_spiegata[2]
+  
+  # Estraggo le coordinate dei siti per il grafico
+  punti_pcoa <- as.data.frame(pcoa_risultato$points)
+  colnames(punti_pcoa) <- c("PCoA1", "PCoA2")
+  punti_pcoa$ID_SEGMENTO <- rownames(punti_pcoa)
+  
+  # UniSCo i metadati dei tratti
+  punti_grafico_pcoa <- punti_pcoa %>%
+    left_join(metadati_permanova, by = "ID_SEGMENTO")
+  
+  # GRAFICO PCoA CON ELLISSI DI CONFIDENZA
+  grafico_pcoa <- ggplot(punti_grafico_pcoa, aes(x = PCoA1, y = PCoA2, color = NOME_TRATTO, fill = NOME_TRATTO)) +
+    # Ellissi che racchiudono il 95% della distribuzione dei segmenti di ogni tratto
+    stat_ellipse(geom = "polygon", alpha = 0.1, linewidth = 0.5, linetype = "dashed") +
+    # Punti dei segmenti campionati
+    geom_point(size = 3.5, alpha = 0.85, shape = 21, color = "black") +
+    # Palette cromatica ad alta leggibilità
+    scale_color_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
+    scale_fill_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
+    labs(
+      title = "Ordinamento Multivariato della Comunità Ornitica (2025)",
+      subtitle = "Principal Coordinates Analysis (PCoA) su matrice Bray-Curtis",
+      x = paste0("PCoA 1 (", asse1_var, "% Varianza Spiegata)"),
+      y = paste0("PCoA 2 (", asse2_var, "% Varianza Spiegata)"),
+      color = "Tratto di Fiume",
+      fill = "Tratto di Fiume"
+    ) +
+    theme_classic(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+  
+  # Mostra il grafico a schermo
+  print(grafico_pcoa)
+  
+  
+  # Salva l'immagine in alta definizione (300 DPI) per la tesi
+  ggsave("C:/RTesi/grafico_pcoa_comunita.png", plot = grafico_pcoa, width = 7.5, height = 6, dpi = 300)
+  
+  
+  # =====================================================================
+  # ---- CODICE RISOLUTIVO TABELLA PERMANOVA COMPLETA PER WORD ----
+  # =====================================================================
+  library(tidyverse)
+  library(flextable)
+  library(officer)
+  
+  # --- COSTRUisco DATAFRAME DELLA PERMANOVA GLOBALE ---
+  permanova_global_df <- as.data.frame(permanova_2025) %>%
+    rownames_to_column(var = "Componente") %>%
+    mutate(Componente = case_when(
+      Componente == "Model" ~ "Modello (Tratto di Fiume)",
+      Componente == "Residual" ~ "Residuo",
+      Componente == "Total" ~ "Totale",
+      TRUE ~ Componente
+    )) %>%
+    select(
+      Sorgente = Componente,
+      Df,
+      SS = SumOfSqs,
+      R2,
+      F_stat = F,
+      p_value = `Pr(>F)`
+    )
+  
+  # --- COSTRUISCO DATAFRAME DEI CONFRONTI POST-HOC ---
+  permanova_posthoc_df <- tibble(
+    Sorgente = c("  - Valle vs Monte", "  - Valle vs Tagli", "  - Monte vs Tagli"),
+    Df      = c(1, 1, 1),
+    SS      = c(0.662, 1.013, 0.618),
+    R2      = c(0.081, 0.120, 0.087),
+    F_stat  = c(4.476, 6.954, 4.565),
+    p_value = c(0.003, 0.003, 0.003) # P-value già corretti con Bonferroni
+  )
+  
+  # --- UNIONISCO LE DUE COMPONENTI ---
+  tabella_permanova_completa <- rbind(
+    permanova_global_df[1, ], 
+    permanova_posthoc_df,     
+    permanova_global_df[2:3, ] 
+  )
+  
+  # --- FORMATTO LA GRAFICA CON FLEXTABLE---
+  ft_permanova <- flextable(tabella_permanova_completa) %>%
+    # Intestazioni formali in italiano
+    set_header_labels(
+      Sorgente = "Sorgente di Variazione / Contrasti",
+      Df       = "Gdf",
+      SS       = "Somma Quadrati (SS)",
+      R2       = "R²",
+      F_stat   = "Valore F",
+      p_value  = "p-value"
+    ) %>%
+    # Formattazione numerica italiana e gestione automatica degli NA (diventano vuoti "")
+    colformat_double(j = c("SS", "R2", "F_stat"), digits = 3, decimal.mark = ",", na_str = "") %>%
+    colformat_double(j = "p_value", digits = 3, decimal.mark = ",", na_str = "") %>%
+    colformat_int(j = "Df") %>%
+    # Stile 
+    theme_booktabs() %>%
+    autofit() %>%
+    bold(part = "header") %>%
+    # Evidenziamo in grassetto i fattori significativi escludendo gli NA per sicurezza
+    bold(i = ~ !is.na(p_value) & p_value < 0.05, j = c("Sorgente", "p_value")) %>%
+    # Allineamenti assi risolvendo i conflitti con il pacchetto terra
+    flextable::align(align = "center", part = "all") %>%
+    flextable::align(j = "Sorgente", align = "left", part = "all")
+  
+  # --- ESPORTO IN WORD ---
+  doc_permanova <- read_docx()
+  doc_permanova <- body_add_par(doc_permanova, "Tabella X.X. Risultati del test di Permutazione dell'Analisi della Varianza Multivariata (PERMANOVA) basata su distanze di Bray-Curtis per la comunità ornitica (Anno 2025) e relativi confronti post-hoc a coppie.", style = "Normal")
+  doc_permanova <- body_add_flextable(doc_permanova, value = ft_permanova)
+  
+  print(doc_permanova, target = "C:/RTesi/tabella_permanova_completa.docx")
+  print("--- TABELLA PERMANOVA GENERATA CON SUCCESSO IN C:/RTesi/tabella_permanova_completa.docx ---")#
+
+  # =====================================================================
+  # ---- GRAFICO  (BARRE ED ERRORE) ----
+  # =====================================================================
+  library(ggplot2)
+  library(dplyr)
+  library(stringr) # Necessario per str_wrap
+  
+  # Testo della didascalia ottimizzato
+  testo_caption <- "Le barre rappresentano il numero medio di specie per segmento ± l'Intervallo di Confidenza (95% CI). Lettere diverse (a, b) indicano differenze statisticamente significative al test di Tukey (p < 0,05)."
+  
+  grafico_barre <- ggplot(dataset_specialisti, aes(x = NOME_TRATTO, y = S_Specialisti, fill = NOME_TRATTO)) +
+    # Barre con la MEDIA
+    stat_summary(
+      fun = mean, 
+      geom = "bar", 
+      alpha = 0.8, 
+      width = 0.5, 
+      color = "black", 
+      linewidth = 0.4
+    ) +
+    # Linee di Errore (IC 95%)
+    stat_summary(
+      fun.data = mean_cl_normal, 
+      geom = "errorbar", 
+      width = 0.15, 
+      color = "black", 
+      linewidth = 0.8
+    ) +
+    # Lettere del test post-hoc (Tukey)
+    annotate("text", x = 1, y = max(dataset_specialisti$S_Specialisti) + 0.5, label = "a", size = 6, fontface = "bold", color = "#2ca02c") +
+    annotate("text", x = 2, y = max(dataset_specialisti$S_Specialisti) + 0.5, label = "b", size = 6, fontface = "bold", color = "black") +
+    annotate("text", x = 3, y = max(dataset_specialisti$S_Specialisti) + 0.5, label = "b", size = 6, fontface = "bold", color = "black") +
+    # Palette di colori
+    scale_fill_manual(values = c("Monte" = "#66c2a5", "Tagli" = "#fc8d62", "Valle" = "#8da0cb")) +
+    # Assi e scritte con str_wrap impostato a 60 caratteri per riga
+    labs(
+      title = "Ricchezza di specie 'specialiste' della fascia ripariale per tratto",
+      subtitle = "Guld: 'avifauna nidificante nella fascia ripariale' (ANCOVA: p < 0,001)",
+      x = "Tratto di fiume monitorato",
+      y = "N° Medio di specie per segmento",
+      # Portando width a 60 il blocco di testo diventa più stretto e verticale, evitando i tagli
+      caption = str_wrap(testo_caption, width = 60)
+    ) +
+    # Tema essenziale
+    theme_classic(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
+      plot.subtitle = element_text(face = "italic", size = 11, color = "dimgray", hjust = 0.5, margin = margin(b = 15)),
+      axis.text.x = element_text(size = 12, face = "bold", color = "black"),
+      axis.text.y = element_text(size = 11, color = "black"),
+      # lineheight = 1.2 imposta la corretta spaziatura verticale tra le righe spezzate della caption
+      plot.caption = element_text(size = 10, face = "italic", color = "dimgray", hjust = 0, lineheight = 1.2, margin = margin(t = 12)),
+      legend.position = "none",
+      panel.grid.major.y = element_line(color = "gray95", linetype = "solid")
+    )
+  
+  # Visualizza nell'anteprima
+  print(grafico_barre)
+  
+  # Salva l'immagine in HD (R adatterà i margini automatici basandosi sul nuovo formato della caption)
+  ggsave(
+    filename = "C:/RTesi/Grafico_Intuitivo_Specialisti_2025.png",
+    plot = grafico_barre,
+    width = 7,
+    height = 5.8, # Ho alzato leggermente l'altezza per dare spazio alle righe in più della didascalia
+    dpi = 300
+  )
+  
+  print("--- GRAFICO CON DIDASCALIA CORRETTA SALVATO CON SUCCESSO! ---")
