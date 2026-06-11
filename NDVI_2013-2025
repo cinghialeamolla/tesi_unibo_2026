@@ -1,0 +1,143 @@
+# =====================================================================
+# ---- CONFRONTO TEMPORALE NDVI (2013 vs 2025) MONTE E VALLE ----
+# =====================================================================
+
+library(tidyverse)
+library(car)
+library(emmeans)
+library(flextable)
+library(officer)
+
+# PREPARAZIONE DEL DATASET 
+dati_confronto <- segmenti %>%
+  filter(NOME_TRATTO %in% c("Monte", "Valle")) %>%
+  mutate(
+    # Risolviamo il problema del testo forzando l'NDVI a numerico
+    NDVI = as.numeric(as.character(NDVI)),
+    ANNO = as.factor(ANNO),
+    NOME_TRATTO = as.factor(NOME_TRATTO)
+  ) %>%
+  filter(!is.na(NDVI)) # Eliminiamo eventuali righe senza dato NDVI
+
+# CALCOLO DELLE STATISTICHE DESCRITTIVE
+medie_confronto <- dati_confronto %>%
+  group_by(ANNO, NOME_TRATTO) %>%
+  summarise(
+    N_Segmenti = n(),
+    NDVI_Medio = mean(NDVI),
+    Dev_Std    = sd(NDVI),
+    .groups = "drop"
+  )
+
+print(medie_confronto)
+
+
+# =====================================================================
+# ---- COSTRUZIONE TABELLA EDITABILE PER LA TESI (WORD) ----
+# =====================================================================
+
+# Trasformo la tabella dell'ANOVA in un formato leggibile per flextable
+anova_df <- as.data.frame(tabella_anova) %>%
+  rownames_to_column(var = "Fattore")
+
+tabella_word_anova <- flextable(anova_df) %>%
+  set_header_labels(
+    Fattore   = "Sorgente di Variazione",
+    `Sum Sq`  = "Somma dei Quadrati",
+    Df        = "Gdf",
+    `F value` = "Valore F",
+    `Pr(>F)`  = "p-value"
+  ) %>%
+  colformat_double(j = c("Sum Sq", "F value"), digits = 3, decimal.mark = ",") %>%
+  colformat_double(j = "Pr(>F)", digits = 4, decimal.mark = ",") %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  bold(part = "header") %>%
+  # Risoluzione del conflitto con il pacchetto 'terra' usando l'assegnazione diretta
+  flextable::align(align = "center", part = "all") %>%
+  flextable::align(j = "Fattore", align = "left", part = "all")
+
+# EvidenziO i p-value significativi (< 0.05) in grassetto nella tabella
+tabella_word_anova <- bold(tabella_word_anova, i = ~ `Pr(>F)` < 0.05, j = "Pr(>F)")
+
+# SALVO SU FILE WORD
+doc_confronto <- read_docx()
+doc_confronto <- body_add_par(doc_confronto, "Tabella ANOVA: Effetto del tratto e dell'anno sui valori di NDVI (Monte vs Valle)", style = "heading 2")
+doc_confronto <- body_add_flextable(doc_confronto, value = tabella_word_anova)
+
+print(doc_confronto, target = "C:/RTesi/tabella_anova_ndvi_temporale.docx")
+print("--- TABELLA CONFRONTO TEMPORALE GENERATA IN C:/RTesi ---")
+
+
+
+# =====================================================================
+# ---- MODELLO STATISTICO: ANOVA A DUE VIE CON INTERAZIONE ----
+# =====================================================================
+modello_ndvi_tempo <- lm(NDVI ~ ANNO * NOME_TRATTO, data = dati_confronto)
+
+# Verifico l'omogeneità delle varianze (Assunzione ANOVA)
+print(car::leveneTest(NDVI ~ ANNO * NOME_TRATTO, data = dati_confronto))
+
+# Tabella dell'ANOVA (Tipo II)
+tabella_anova <- car::Anova(modello_ndvi_tempo, type = "II")
+print(tabella_anova)
+
+# CONFRONTI POST-HOC (Confronto 2013 vs 2025 dentro ciascun tratto)
+post_hoc_tempo <- emmeans(modello_ndvi_tempo, pairwise ~ ANNO | NOME_TRATTO, adjust = "bonferroni")
+print(post_hoc_tempo$contrasts)
+
+# install.packages("nlme")
+library(nlme)
+
+# Modello GLS che permette varianze diverse per ogni combinazione di ANNO e TRATTO
+modello_robusto <- gls(NDVI ~ ANNO * NOME_TRATTO, 
+                       weights = varIdent(form = ~ 1 | ANNO * NOME_TRATTO), 
+                       data = dati_confronto)
+
+# Nuova tabella ANOVA
+car::Anova(modello_robusto, type = "II")
+
+# Nuovi contrasti post-hoc
+post_hoc_robusto <- emmeans(modello_robusto, pairwise ~ ANNO | NOME_TRATTO, adjust = "bonferroni")
+print(post_hoc_robusto$contrasts)
+
+
+
+ =====================================================================
+# ---- GRAFICO DI INTERAZIONE NDVI (2013 vs 2025) ----
+# =====================================================================
+library(ggplot2)
+
+# Estraggo le medie e gli errori standard dal modello per fare il grafico
+medie_grafico <- as.data.frame(emmeans(modello_robusto, ~ ANNO * NOME_TRATTO))
+
+grafico_interazione <- ggplot(medie_grafico, aes(x = ANNO, y = emmean, group = NOME_TRATTO, color = NOME_TRATTO)) +
+  # Linee di interazione che collegano i punti nel tempo
+  geom_line(linewidth = 1.2, alpha = 0.8) +
+  # Punti che indicano il valore medio di NDVI stimato
+  geom_point(size = 4, stroke = 1.5) +
+  # Barre di errore basate sull'intervallo di confidenza (95% CI)
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.1, linewidth = 1) +
+  # Palette di colori scientifica e pulita
+  scale_color_manual(values = c("#2c7bb6", "#d7191c")) +
+  # Titoli e label degli assi
+  labs(
+    title = "Evoluzione Temporale dell'NDVI Medio (2013 vs 2025)",
+    subtitle = "Modello GLS con varianze eterogenee (Intervalli di confidenza al 95%)",
+    x = "Anno di Monitoraggio",
+    y = "NDVI Medio (Valore Stimato)",
+    color = "Tratto di Fiume"
+  ) +
+  # Tema minimale
+  theme_classic(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hcut = 0.5),
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray90", linetype = "dashed")
+  )
+
+# Mostra il grafico
+print(grafico_interazione)
+
+# Salva il grafico
+ggsave("C:/RTesi/grafico_interazione_ndvi.png", plot = grafico_interazione, width = 7, height = 5, dpi = 300)
