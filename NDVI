@@ -80,7 +80,7 @@ ndvi_2025 <- rast("ndvi_ombrone_2025.tif")
 dati_punti <- read.csv("punti.csv", sep = ";", dec = ",")
 punti_geo  <- vect(dati_punti, geom = c("est", "nord"), crs = "EPSG:32632")
 
-# Devo eliminare i pixel di acqua acqua (Sotto lo 0.1 è acqua/suolo nudo umido)
+# Devo eliminare i pixel di acqua (Sotto lo 0.1 è acqua/suolo nudo umido)
 ndvi_2013_veg <- ifel(ndvi_2013 <= 0.1, NA, ndvi_2013)
 ndvi_2025_veg <- ifel(ndvi_2025 <= 0.1, NA, ndvi_2025)
 
