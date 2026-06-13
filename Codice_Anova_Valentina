@@ -1141,8 +1141,6 @@ Anova(glm_specialisti, type = "III")
 # NOME_TRATTO  10.3044  2   0.005787 **
 # NDVI          0.8362  1   0.360482   
 # Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
- 
-
 
 # Medie stimate e Post-Hoc di Tukey (scala reale)
 medie_gls_spec <- emmeans(glm_specialisti, ~ NOME_TRATTO, type = "response")
