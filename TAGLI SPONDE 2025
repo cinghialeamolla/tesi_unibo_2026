@@ -1,0 +1,23 @@
+
+ library(readxl)
+  library(vegan) # per il calcolo degli indici ecologici
+  library(car) # per il test di Levene (omogeneità delle varianze)
+  library(MASS) # per glm.nb()
+  library(tidyverse)
+  library(emmeans) # per i confronti post-hoc dei GLM
+  library(dplyr)
+  library(flextable)
+  library(patchwork)
+  library(ggdist)
+  library(officer)
+}
+
+# Ho dovuto risolvere un probema di conflitto tra pacchetti istallati sul mio R
+library(conflicted)
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+
+
+## ---- load data ----
+setwd("C:/RTesi")
+
