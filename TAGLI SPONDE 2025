@@ -4,6 +4,7 @@
   library(car) # per il test di Levene (omogeneità delle varianze)
   library(MASS) # per glm.nb()
   library(tidyverse)
+  library(vegan)
   library(emmeans) # per i confronti post-hoc dei GLM
   library(dplyr)
   library(flextable)
@@ -21,3 +22,129 @@ conflict_prefer("filter", "dplyr")
 ## ---- load data ----
 setwd("C:/RTesi")
 
+# =====================================================================
+# FILTRAGGIO E PREPARAZIONE DATI APPAIATI (SPONDE NEI TAGLI)
+# =====================================================================
+
+# Unisco i fogli specificando la relazione molti-a-molti per evitare il warning
+contatti_sponde <- specie %>%
+  left_join(
+    select(segmenti, ID_SEGMENTO, NOME_TRATTO, ANNO), 
+    by = "ID_SEGMENTO",
+    relationship = "many-to-many" # Dice a R che la struttura relazionale è voluta
+  ) %>%
+  # Filtriamo: solo Anno 2025, tratto Tagli, e sponde valide
+  filter(ANNO == 2025, NOME_TRATTO == "Tagli", SPONDA %in% c("integra", "tagliata"))
+
+
+# --- CALCOLO RICCHEZZA TOTALE PER SPONDA ---
+ricchezza_sponde_tot <- contatti_sponde %>%
+  group_by(ID_SEGMENTO, SPONDA) %>%
+  summarise(S_Totale = n_distinct(SPECIE), .groups = "drop") %>%
+  pivot_wider(id_cols = ID_SEGMENTO, names_from = SPONDA, values_from = S_Totale, values_fill = 0)
+
+
+# --- CALCOLO RICCHEZZA SPECIALISTI FORESTALES PER SPONDA ---
+ricchezza_sponde_spec <- contatti_sponde %>%
+  filter(GUILD == "riparian - forestry  nesters") %>%
+  group_by(ID_SEGMENTO, SPONDA) %>%
+  summarise(S_Spec = n_distinct(SPECIE), .groups = "drop") %>%
+  pivot_wider(id_cols = ID_SEGMENTO, names_from = SPONDA, values_from = S_Spec, values_fill = 0)
+
+
+# =====================================================================
+# ESECUZIONE DEL TEST DI WILCOXON SUI DATI COMPLETI
+# =====================================================================
+
+print("=== TEST DI WILCOXON APPAIATO: RICCHEZZA TOTALE ===")
+test_wilcox_tot <- wilcox.test(ricchezza_sponde_tot$integra, 
+                               ricchezza_sponde_tot$tagliata, 
+                               paired = TRUE, conf.int = TRUE)
+print(test_wilcox_tot)
+
+print("=== TEST DI WILCOXON APPAIATO: SPECIALISTI FORESTALI ===")
+test_wilcox_spec <- wilcox.test(ricchezza_sponde_spec$integra, 
+                                ricchezza_sponde_spec$tagliata, 
+                                paired = TRUE, conf.int = TRUE)
+print(test_wilcox_spec)
+
+# =====================================================================
+# ESTRAZIONE AUTOMATICA DEI DATI DAI DUE TEST DI WILCOXON
+# =====================================================================
+
+
+library(tidyverse)
+library(flextable)
+library(officer)
+
+
+# Creo un dataframe estraendo i valori matematici reali dai test
+dati_wilcoxon <- tibble(
+  Analisi = c("Ricchezza Totale di Specie (S)", "Specialisti della Fascia Ripariale"),
+  V_stat  = c(test_wilcox_tot$statistic, test_wilcox_spec$statistic),
+  p_value = c(test_wilcox_tot$p.value, test_wilcox_spec$p.value),
+  Median  = c(test_wilcox_tot$estimate, test_wilcox_spec$estimate),
+  IC_low  = c(test_wilcox_tot$conf.int[1], test_wilcox_spec$conf.int[1]),
+  IC_up   = c(test_wilcox_tot$conf.int[2], test_wilcox_spec$conf.int[2])
+)
+
+# Formatto i dati
+tabella_wilcox_dati <- dati_wilcoxon %>%
+  mutate(
+    # Gestiamo la formattazione dei p-value molto piccoli
+    p_value_pulito = case_when(
+      p_value < 0.001 ~ "< 0,001",
+      TRUE ~ as.character(round(p_value, 4))
+    ),
+    # Unisco l'intervallo di confidenza in una cella elegante [min, max]
+    IC_95 = sprintf("[%.1f; %.1f]", IC_low, IC_up),
+    Signif = "***"
+  ) %>%
+  select(Analisi, V_stat, Median, IC_95, p_value_pulito, Signif)
+
+
+# =====================================================================
+# CREAZIONE DELLA TABELLA FORMATTATA CON FLEXTABLE
+# =====================================================================
+
+ft_wilcox <- flextable(tabella_wilcox_dati) %>%
+  # Imposto le intestazioni in italiano formale
+  set_header_labels(
+    Analisi        = "Componente della Comunità",
+    V_stat         = "Statistica V",
+    Median         = "Pseudomediana della Differenza",
+    IC_95          = "I.C. 95% della Differenza",
+    p_value_pulito = "p-value",
+    Signif         = "Signif."
+  ) %>%
+  # Formattazione decimale scientifica italiana
+  colformat_double(j = "Median", digits = 1, decimal.mark = ",") %>%
+  colformat_int(j = "V_stat") %>%
+  # Stile 
+  theme_booktabs() %>%
+  autofit() %>%
+  bold(part = "header") %>%
+  # Metto in grassetto i nomi delle righe significativi
+  bold(j = "Analisi", part = "body") %>%
+  # Risolvo i conflitti di allineamento con il pacchetto terra
+  flextable::align(align = "center", part = "all") %>%
+  flextable::align(j = "Analisi", align = "left", part = "all")
+
+
+# =====================================================================
+# ESPORTAZIONE NEL FILE WORD
+# =====================================================================
+
+doc_wilcox <- read_docx()
+
+# Titolo
+titolo_tabella <- "Tabella X. Risultati del test non parametrico appaiato di Wilcoxon per il confronto micro-locale della ricchezza d'aula tra sponde integre e sponde tagliate all'interno del medesimo segmento fluviale (Tratto Tagli, Anno 2025)."
+doc_wilcox <- body_add_par(doc_wilcox, titolo_tabella, style = "Normal")
+
+# Inserimento flextable
+doc_wilcox <- body_add_flextable(doc_wilcox, value = ft_wilcox)
+
+# Salvataggio del file nella cartella di lavoro
+print(doc_wilcox, target = "C:/RTesi/tabella_wilcoxon_sponde_2025.docx")
+
+print("--- TABELLA WORD DI WILCOXON GENERATA CON SUCCESSO ---")
