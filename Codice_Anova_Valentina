@@ -129,6 +129,166 @@ print(doc_ndvi, target = "C:/RTesi/tabella_medie_ndvi_2025.docx")
 print("--- TABELLA WORD GENERATA CON SUCCESSO ---")
 
 
+# =====================================================================
+# EXTRAZIONE ID_SEGMENTO PER VALORI ESTREMI DI NDVI (2025)
+# =====================================================================
+
+# Segmenti con l'NDVI PIÙ BASSO (Minimo) per ciascun tratto
+min_ndvi <- seg_2025_corretto %>%
+  group_by(NOME_TRATTO) %>%
+  slice_min(order_by = NDVI, n = 1, with_ties = FALSE) %>%
+  select(NOME_TRATTO, ID_MIN = ID_SEGMENTO, VAL_MIN = NDVI)
+
+# Estraggiamo i massimi
+max_ndvi <- seg_2025_corretto %>%
+#  group_by -> dice a R di isolare i tratti ed eseguire l'operazione separatamente per ognuno
+  group_by(NOME_TRATTO) %>%
+# estrae solo la riga (o le righe) con il valore più alto nella colonna indicata
+# with_ties = FALSE -> estrae solo il primo valore
+  slice_max(order_by = NDVI, n = 1, with_ties = FALSE) %>%
+  select(NOME_TRATTO, ID_MAX = ID_SEGMENTO, VAL_MAX = NDVI)
+
+# Uniamo i dati in un unico dataframe pulito
+dati_estremi <- left_join(min_ndvi, max_ndvi, by = "NOME_TRATTO")
+
+
+
+# CREAZIONE DELLA TABELLA FORMATTATA (FLEXTABLE)
+
+tabella_estremi <- flextable(dati_estremi) %>%
+  # Rinomino le intestazioni delle colonne
+  set_header_labels(
+    NOME_TRATTO = "Tratto di Fiume",
+    ID_MIN      = "ID Segmento Min",
+    VAL_MIN     = "NDVI Minimo",
+    ID_MAX      = "ID Segmento Max",
+    VAL_MAX     = "NDVI Massimo"
+  ) %>%
+  # Formatto i numeri decimali (3 cifre e virgola italiana)
+  colformat_double(j = c("VAL_MIN", "VAL_MAX"), digits = 3, decimal.mark = ",") %>%
+  # Applico lo stile pulito booktabs (linee orizzontali eleganti)
+  theme_booktabs() %>%                
+  autofit() %>%                       
+  bold(part = "header") %>%           
+  # Risolvo il bug dei conflitti di allineamento con terra
+  flextable::align(align = "center", part = "all") %>% 
+  flextable::align(j = "NOME_TRATTO", align = "left", part = "all")
+
+
+# Inizializziamo il documento Word
+doc_estremi <- read_docx()
+
+# Aggiungmo il titolo di sezione (Stile Heading 2)
+doc_estremi <- body_add_par(doc_estremi, "Localizzazione dei Segmenti Estremi di NDVI", style = "heading 2")
+doc_estremi <- body_add_flextable(doc_estremi, value = tabella_estremi)
+
+# Salvo il file Word nella tua cartella di tesi
+print(doc_estremi, target = "C:/RTesi/tabella_id_estremi_ndvi_2025.docx")
+
+print("--- TABELLA WORD GENERATA CON SUCCESSO ---")
+
+
+# =====================================================================
+# ---- ANOVA PER NDVI (2025) ----
+# =====================================================================
+
+anova_NDVI <- lm(NDVI ~ NOME_TRATTO, data = seg_2025_corretto)
+print(summary(anova_NDVI))
+
+
+# verifica degli assunti dell'ANOVA: importante, da fare prima di guardare i risultati!
+# perché se gli assunti non sono rispettati dobbiamo passare al blocco di analisi successivo
+shapiro.test(residuals(anova_NDVI)) # p-value = 0.6947, è superiore a 0,05, significa che è i residui sono normali
+
+levene_S <- leveneTest(NDVI ~ NOME_TRATTO, data = seg_2025_corretto)
+print(levene_S) # p-value=0.003957 < p-vaue 0,05; quindi le varianze non sono omogenee
+
+# DEVO USARE UN ALTRO MODELLO PER L'ANOVA
+
+# Imposto il modello "Generalized Linear Models"
+gls_ndvi <- gls(NDVI ~ NOME_TRATTO, 
+                        data = seg_2025_corretto, 
+                        weights = varIdent(form = ~ 1 | NOME_TRATTO))
+
+Anova(gls_ndvi, type = "III")
+
+# Calcolo dei confronti post-hoc di Tukey per varianze diverse
+confronti_posthoc <- emmeans(gls_ndvi, pairwise ~ NOME_TRATTO, adjust = "tukey")
+
+# VisualizzO i risultati dei contrasti a coppie
+print(confronti_posthoc$contrasts)
+
+# OUTPUT p.value
+# Monte - Tagli   p.value 0.4705 > 0.05
+# Monte - Valle   p.value <0.0001 < 0.05
+# Tagli - Valle   p.value <0.0001 < 0.05
+
+library(tidyverse)
+library(flextable)
+library(officer)
+
+# =====================================================================
+# CEAZIONE TABELLA
+# =====================================================================
+
+# Trasformo l'output dei contrasti in un dataframe
+dati_contrasti <- as.data.frame(confronti_posthoc$contrasts)
+
+# Creio le colonne di supporto
+dati_contrasti$Significativita <- case_when(
+  dati_contrasti$p.value < 0.001 ~ "***",
+  dati_contrasti$p.value < 0.01  ~ "**",
+  dati_contrasti$p.value < 0.05  ~ "*",
+  TRUE                           ~ "NS (Non Signif.)"
+)
+
+dati_contrasti$p.value_pulito <- if_else(
+  dati_contrasti$p.value < 0.0001, 
+  "< 0,0001", 
+  as.character(round(dati_contrasti$p.value, 4))
+)
+
+# Seleziono solo le colonne utili per la tesi
+tabella_tesi_dati <- dati_contrasti[, c("contrast", "estimate", "SE", "p.value_pulito", "Significativita")]
+
+
+tabella_word <- flextable(tabella_tesi_dati)
+
+# Rinomino le colonne
+tabella_word <- set_header_labels(tabella_word,
+  contrast        = "Contrasto (Tratto A - Tratto B)",
+  estimate        = "Differenza Stimata (Δ)",
+  SE              = "Errore Standard (SE)",
+  p.value_pulito  = "p-value (Tukey)",
+  Significativita = "Significatività"
+)
+
+# Applico i formati
+tabella_word <- colformat_double(tabella_word, j = c("estimate", "SE"), digits = 3, decimal.mark = ",", big.mark = "")
+tabella_word <- theme_booktabs(tabella_word)
+tabella_word <- autofit(tabella_word)
+tabella_word <- bold(tabella_word, part = "header")
+
+# Allineo forzando l'origine da flextable per via del conflitto con terra
+tabella_word <- flextable::align(tabella_word, align = "center", part = "all")
+tabella_word <- flextable::align(tabella_word, j = "contrast", align = "left", part = "all")
+
+
+# Inizializzo il documento Word
+doc_contrasti <- read_docx()
+
+# Aggiungo un titolo (Stile Heading 2)
+doc_contrasti <- body_add_par(doc_contrasti, "Risultati dei Confronti Post-Hoc (Tukey) sull'NDVI", style = "heading 2")
+
+# Inserisco direttamente la tabella formattata
+doc_contrasti <- body_add_flextable(doc_contrasti, value = tabella_word)
+
+# Salvo il file Word nella tua cartella
+print(doc_contrasti, target = "C:/RTesi/tabella_contrasti_ndvi_2025.docx")
+
+print("--- TABELLA DEI CONTRASTI WORD GENERATA CON SUCCESSO ---")
+
+
 ## =====================================================================
 ## ---- CALCOLO INDICI DIVERSITA' e TABELLA RIASSUNTIVA ----
 ## =====================================================================
@@ -254,89 +414,15 @@ ggsave("grafico_biodiversita_completo.png", width = 11, height = 5, dpi = 300)
 anova_S <- aov(Ricchezza_S ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
 anova_S
 
-# OUTPUT: 2 out of 80 effects not estimable
-
-# Ho controllato la struttura delle variabili
-str(dataset_analisi_1[, c("Ricchezza_S", "NOME_TRATTO", "NDVI")])
-
-
-#  Ho pulito e convertito i dati nel dataset finale
-dataset_analisi_1 <- dataset_analisi_1 %>%
-  mutate(
-    # Sostituisce la virgola con il punto e trasforma in numero reale
-    NDVI = as.numeric(gsub(",", ".", NDVI)),
-    # Trasforma il tratto in fattore (Monte, Tagli, Valle)
-    NOME_TRATTO = as.factor(NOME_TRATTO)
-  )
-
-# Ho rilanciato il comando:
-anova_S <- aov(Ricchezza_S ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
-anova_S
 
 #   OUTPUT:         NOME_TRATTO     NDVI Residuals
 #  Sum of Squares      17.0260   4.9277  539.4308
 # Deg. of Freedom           2        1        74
 # Residual standard error: 2.699927
+# Estimated effects may be unbalanced
 
 # l'ANOVA non sembra significativa
-
-# verifica degli assunti dell'ANOVA: importante, da fare prima di guardare i risultati!
-# perché se gli assunti non sono rispettati dobbiamo passare al blocco di analisi successivo
-shapiro.test(residuals(anova_S)) # p-value = 0.4943, è superiore a 0,05, significa che è i residui sono normali
-
-levene_S <- leveneTest(Ricchezza_S ~ NOME_TRATTO, data = dataset_analisi_1)
-print(levene_S) # p-value=0.9138 > p-vaue 0,05; quindi le varianze dovrebbero essere omogenee
-
-# I due test sopra mi sembrano ok, però l'ANOVA non è significativa
-# ma se faccio il test post-hoc di Tukey per vedere quali tratti differiscono, mi dà un errore sulla gestione dell'NDVI
-
-# print("--- TEST POST-HOC TUKEY RICCHEZZA (S) ---")
-# print(TukeyHSD(anova_S))
-# plot(TukeyHSD(anova_S))
-# OUTPUT: non-fattori ignorati: NDVI
-
-
-# Ho provato a fare L'ANOVA escludendo NDVI, 
-print("=== ANOVA RICCHEZZA (S) SENZA NDVI ===")
-anova_S_semplice <- aov(Ricchezza_S ~ NOME_TRATTO, data = dataset_analisi_1)
-print(summary(anova_S_semplice))
-
-# Verifica delle assunzioni (normalità dei residui e omogeneità varianze)
-print(shapiro.test(residuals(anova_S_semplice)))  #p-value = 0.2136 > 0,05, i residui sono normali
-print(leveneTest(Ricchezza_S ~ NOME_TRATTO, data = dataset_analisi_1)) # p-value=0.9138 > p-vaue 0,05;
-# le varianze dovrebbero essere omogenee
-
-# TukeyHSD
-print("--- TEST POST-HOC TUKEY RICCHEZZA (S) ---")
-print(TukeyHSD(anova_S_semplice))
-
-
-# Tagli-Monte:  p-value = 0.2863504 > 0,05
-# Valle-Monte:  p-value = 0.7997488 > 0,05
-# Valle-Tagli:  p-value = 0.6250765 > 0,05
-
-# Il p-value è maggiore di 0.05: non ci sono differenze statisticamente significative 
-# nella Ricchezza di specie (S) tra i tre tratti (Monte, Tagli, Valle). 
-# I tre ambienti ospitano mediamente lo stesso numero di specie per segmento
-
-# Allora ho provato con l'ANCOVA
-print("--- TABELLA ANCOVA ---")
-print(summary(anova_S))
-print("--- TEST POST-HOC CON EMMEANS RICCHEZZA (S) ---")
-
-# Ho calcolato le medie marginali stimate per il Tratto
-medie_em <- emmeans(anova_S, ~ NOME_TRATTO)
-
-# Ho provato il confronto a coppie (in sostituzione a Tukey)
-confronti <- pairs(medie_em, adjust = "tukey")
-print(confronti)
-
-# Tagli-Monte:  p-value = 0.5080 > 0,05
-# Valle-Monte:  p-value = 0.9997 > 0,05
-# Valle-Tagli:  p-value = 0.4933 > 0,05
-
-# Il p-value è 0.414 (maggiore di 0.05). 
-# L'indice NDVI non ha una relazione statisticamente significativa con S
+# Sono passata al GLM
 
 
 ## HO RIPETUTO PER GLI ALTRI INDICI DI DIVERSITA'
@@ -346,27 +432,12 @@ print(confronti)
   anova_H <- aov(Shannon_H ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
   anova_H
   
-  shapiro.test(residuals(anova_H)) # p-value = 0.06082, è superiore a 0,05, residui sono normali
+  shapiro.test(residuals(anova_H)) # p-value = 0.04702, è INFERIORE a 0,05, residui NON sono normali
   
   levene_H <- leveneTest(Shannon_H ~ NOME_TRATTO, data = dataset_analisi_1)
-  print(levene_H) # p-value= 0.3517 > p-vaue 0,05; le varianze dovrebbero essere omogenee
+  print(levene_H) # p-value=  0.3517 > p-vaue 0,05; le varianze dovrebbero essere omogenee
   
-  
-  print("--- RISULTATI ANCOVA SHANNON (H') CON NDVI ---")
-  print(summary(anova_H))
-  
-  # Anche qui ho provato il test post - hoc
-  print("--- TEST POST-HOC CON EMMEANS SHANNON (H) ---")
-  H_medie_em <- emmeans(anova_H, ~ NOME_TRATTO)
-  confronti_H <- pairs(H_medie_em, adjust = "tukey")
-  print(confronti_H)
-
-  # Tagli-Monte:  p-value = 0.6331 > 0,05
-  # Valle-Monte:  p-value = 0.8966 > 0,05
-  # Valle-Tagli:  p-value = 0.3059 > 0,05
-  
-  # Il p-value è sempre maggiore di 0.05.
-  # L'indice NDVI non ha una relazione statisticamente significativa con Shannon (H)
+   #  Devo comunque cambiare approccio anche qui
 
 
 
@@ -376,7 +447,7 @@ print(confronti)
   print("--- RISULTATI ANCOVA EVEnNESS (J') CON NDVI ---")
   print(summary(anova_J))
   
-  shapiro.test(residuals(anova_J)) # p-value = 1.498e-09, è MOLTO inferiore a 0,05, i residui non sono normali, suppongo
+  shapiro.test(residuals(anova_J)) # p-value = 1.429e-09, è MOLTO inferiore a 0,05, i residui non sono normali, suppongo
   
   levene_J <- leveneTest(Evenness_J ~ NOME_TRATTO, data = dataset_analisi_1)
   print(levene_J) #p-value = 0.2678 > p-vaue 0,05; quindi le varianze dovrebbero essere omogenee
@@ -398,13 +469,13 @@ print(confronti)
 # quindi qui sotto ci sono tre sezioni separate per i tre indici di diversità
 # ==============================================================================
 
-## ==============================================================================
+  ## ==============================================================================
   ## ---- GLM: RICCHEZZA ----
   ## ==============================================================================
   
   # Modello con Tratto e NDVI come predittori - passando al GLM,
   # possiamo già inserire altre variabili esplicative come l'NDVI
-  # Ho comunque provato a farlo
+ 
   {
     glm_poisson <- glm(
       Ricchezza_S ~ NOME_TRATTO + NDVI,
@@ -427,7 +498,7 @@ print(confronti)
   # Se è decisamente > 1.3, c'è sovradispersione!
   # Se è inferiore a 0.7, c'è sottodispersione (raro)
   
-  # OUTPUT - Ratio di dispersione: 0.6428572 
+  # OUTPUT - Ratio di dispersione: 0.6354929  
   # Direi che siamo nel secondo caso
   
 ### ================================================================================================
@@ -481,7 +552,79 @@ print(confronti)
   )
   print(confronti_tratti$contrasts)
 
-# Il p-value è leggermente inferiore solo per Tagli-valle, ma comunque troppo vicino a 0,05
+# Il p-value sempre > 0,05
+
+
+# =====================================================================
+# COSTRUZIONE TABELLA COEFFICIENTI GLM QUASIPOISSON
+# =====================================================================
+
+library(tidyverse)
+library(broom)
+library(flextable)
+library(officer)
+
+# =====================================================================
+# ESTRAZIONE E PREPARAZIONE DATI
+# =====================================================================
+
+dati_S <- tidy(glm_ricchezza_finale) %>%
+  mutate(term = case_when(
+    term == "(Intercept)" ~ "Intercetta (Monte)",
+    term == "NOME_TRATTOTagli" ~ "Tratto: Tagli",
+    term == "NOME_TRATTOValle" ~ "Tratto: Valle",
+    term == "NDVI" ~ "NDVI (Covariata)",
+    TRUE ~ term
+  )) %>%
+  # Aggiungo la colonna per i simboli di significatività (stelline)
+  mutate(
+    Signif = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE            ~ "NS"
+    ),
+    # Arrotondo il p-value per visualizzarlo in modo pulito
+    p.value = if_else(p.value < 0.001, "< 0,001", as.character(round(p.value, 4)))
+  ) %>%
+  # Seleziono le colonne
+  select(term, estimate, std.error, statistic, p.value, Signif)
+
+
+ft_S <- flextable(dati_S) %>%
+  # Rinomino i titoli delle colonne in italiano
+  set_header_labels(
+    term      = "Variabile / Predittore",
+    estimate  = "Stima (β)",
+    std.error = "Errore Standard (SE)",
+    statistic = "Valore t",
+    p.value   = "p-value",
+    Signif    = "Signif."
+  ) %>%
+  # Formattazione decimale scientifica (3 cifre e virgola italiana)
+  colformat_double(j = c("estimate", "std.error", "statistic"), digits = 3, decimal.mark = ",", big.mark = "") %>%
+  # Applico lo stile
+  theme_booktabs() %>%                
+  autofit() %>%                       
+  bold(part = "header") %>%           
+  # Allineo i testi per evitare conflitti con il pacchetto terra
+  flextable::align(align = "center", part = "all") %>% 
+  flextable::align(j = "term", align = "left", part = "all")
+
+doc_S <- read_docx()
+
+# Inserisco il titolo descrittivo richiesto
+doc_S <- body_add_par(doc_S, "Tabella 1: Risultati del Modello Lineare Generalizzato (GLM Quasipoisson) sulla Ricchezza di specie (S) per l'anno 2025.", style = "Normal")
+
+# Inserisco la tabella
+doc_S <- body_add_flextable(doc_S, value = ft_S)
+
+# Salvo il file Word nella cartella della tua tesi
+print(doc_S, target = "C:/RTesi/tabella_1_ricchezza_S_2025.docx")
+
+print("--- TABELLA 1 WORD GENERATA CON SUCCESSO ---")
+
+
 
 ## ==============================================================================
 ## ---- LM: SHANNON ----
@@ -534,7 +677,65 @@ print(confronti)
   print(posthoc_shannon$contrasts)
 }
 
-# Anche qui i risultati riprendono quanto emerso dalla stessa ANCOVA
+
+ # Monte - Tagli    p-value  0.6360
+ # Monte - Valle    p-value  0.6803
+ # Tagli - Valle    p-value  0.2283
+#  p-value sempre > 0,05
+
+
+
+# =====================================================================
+# PREPARAZIONE DATI PER LA TABELLA 2 (SHANNON)
+# =====================================================================
+
+dati_H <- tidy(lm_shannon) %>%
+  mutate(term = case_when(
+    term == "(Intercept)" ~ "Intercetta (Monte)",
+    term == "NOME_TRATTOTagli" ~ "Tratto: Tagli",
+    term == "NOME_TRATTOValle" ~ "Tratto: Valle",
+    term == "NDVI" ~ "NDVI (Covariata)",
+    TRUE ~ term
+  )) %>%
+  # Aggiungoo la colonna per la significatività
+  mutate(
+    Signif = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE            ~ "NS"
+    ),
+    # Arrotondo il p-value
+    p.value = if_else(p.value < 0.001, "< 0,001", as.character(round(p.value, 4)))
+  ) %>%
+  # Seleziono le colonne
+  select(term, estimate, std.error, statistic, p.value, Signif)
+
+
+ft_H <- flextable(dati_H) %>%
+  set_header_labels(
+    term      = "Variabile / Predittore",
+    estimate  = "Stima (β)",
+    std.error = "Errore Standard (SE)",
+    statistic = "Valore t",
+    p.value   = "p-value",
+    Signif    = "Signif."
+  ) %>%
+  colformat_double(j = c("estimate", "std.error", "statistic"), digits = 3, decimal.mark = ",", big.mark = "") %>%
+  theme_booktabs() %>%                
+  autofit() %>%                       
+  bold(part = "header") %>%           
+  flextable::align(align = "center", part = "all") %>% 
+  flextable::align(j = "term", align = "left", part = "all")
+
+# Salvo il documento Word dedicato
+doc_H <- read_docx()
+doc_H <- body_add_par(doc_H, "Tabella 2: Risultati del Modello Lineare Gaussiano sull'Indice di diversità di Shannon (H') previa trasformazione di Box-Cox (Anno 2025).", style = "Normal")
+doc_H <- body_add_flextable(doc_H, value = ft_H)
+
+print(doc_H, target = "C:/RTesi/tabella_2_shannon_H_2025.docx")
+print("--- TABELLA 2 SHANNON WORD GENERATA CON SUCCESSO ---")
+
 
 
 ### ==============================================================================
@@ -560,7 +761,7 @@ print(confronti)
   }
   summary(modello_beta_j)
   
-  # TRATTOValle: p-value = 0.0548. Si trova appena sopra la soglia
+  # TRATTOValle: p-value = 0.0594. Si trova appena sopra la soglia
   # Tutti gli altri p-value sono sopra
   
 ### ================================================================================================
@@ -578,41 +779,10 @@ print(confronti)
 # Non sembrano esserci differenze significative
   
   
+# =====================================================================
+# PREPARAZIONE DATI PER LA TABELLA 3 (EVENNESS)
+# =====================================================================
 
-
-### ================================================================================================
-### ---- SPERIMENTAZIONI PAM -----
-### ================================================================================================
-
-library(flextable)
-library(officer)
-library(dplyr)
-library(broom)
-
-# --- PREPARAZIONE DATI PER LE 3 TABELLE ---
-
-# Tabella 1: Ricchezza (S) - GLM Quasipoisson
-dati_S <- tidy(glm_ricchezza_finale) %>%
-  mutate(term = case_when(
-    term == "(Intercept)" ~ "Intercetta (Monte)",
-    term == "NOME_TRATTOTagli" ~ "Tratto: Tagli",
-    term == "NOME_TRATTOValle" ~ "Tratto: Valle",
-    term == "NDVI" ~ "NDVI (Covariata)",
-    TRUE ~ term
-  )) %>%
-  select(term, estimate, std.error, statistic, p.value)
-
-# Tabella 2: Shannon (H') - ANCOVA
-dati_H <- tidy(anova_H) %>%
-  filter(term != "Residuals") %>%
-  mutate(term = case_when(
-    term == "NOME_TRATTO" ~ "Tratto (Monte vs Tagli vs Valle)",
-    term == "NDVI" ~ "NDVI (Covariata)",
-    TRUE ~ term
-  )) %>%
-  select(term, df, sumsq, meansq, statistic, p.value)
-
-# Tabella 3: Evenness (J') - Regressione Beta
 dati_J <- tidy(modello_beta_j) %>%
   filter(component == "mean") %>%
   mutate(term = case_when(
@@ -622,51 +792,43 @@ dati_J <- tidy(modello_beta_j) %>%
     term == "NDVI" ~ "NDVI (Covariata)",
     TRUE ~ term
   )) %>%
-  select(term, estimate, std.error, statistic, p.value)
+  mutate(
+    Signif = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      p.value < 0.1   ~ ".",
+      TRUE            ~ "NS"
+    ),
+    p.value = if_else(p.value < 0.001, "< 0,001", as.character(round(p.value, 4)))
+  ) %>%
+  select(term, estimate, std.error, statistic, p.value, Signif)
 
 
-# --- FUNZIONE AUSILIARIA PER APPLICARE LO STILE APA ---
-formatta_tabella <- function(df, tipo = "glm_beta") {
-  ft <- flextable(df) %>% theme_booktabs() %>% autofit()
-  
-  if (tipo == "glm_beta") {
-    ft <- ft %>%
-      colformat_double(j = c("estimate", "std.error", "statistic"), digits = 3) %>%
-      colformat_double(j = "p.value", digits = 4) %>%
-      set_header_labels(term = "Parametro", estimate = "Stima (Coef.)", std.error = "Err. Std.", statistic = "Statistica (t/z)", p.value = "p-value")
-  } else {
-    ft <- ft %>%
-      colformat_double(j = c("sumsq", "meansq", "statistic"), digits = 3) %>%
-      colformat_double(j = "p.value", digits = 4) %>%
-      set_header_labels(term = "Sorgente di Variazione", df = "Gradi Libertà (Df)", sumsq = "Somma Quadrati (SS)", meansq = "Quadrato Medio (MS)", statistic = "Valore F", p.value = "p-value")
-  }
-  return(ft)
-}
+ft_J <- flextable(dati_J) %>%
+  set_header_labels(
+    term      = "Variabile / Predittore",
+    estimate  = "Stima (β)",
+    std.error = "Errore Standard (SE)",
+    statistic = "Valore z",
+    p.value   = "p-value",
+    Signif    = "Signif."
+  ) %>%
+  colformat_double(j = c("estimate", "std.error", "statistic"), digits = 3, decimal.mark = ",", big.mark = "") %>%
+  theme_booktabs() %>%                
+  autofit() %>%                       
+  bold(part = "header") %>%           
+  flextable::align(align = "center", part = "all") %>% 
+  flextable::align(j = "term", align = "left", part = "all")
 
-ft_S <- formatta_tabella(dati_S, "glm_beta")
-ft_H <- formatta_tabella(dati_H, "ancova")
-ft_J <- formatta_tabella(dati_J, "glm_beta") %>%
-  bg(i = ~ p.value > 0.05 & p.value < 0.10, j = "p.value", bg = "#F5F5F5") # Evidenzia il trend di Valle
+doc_J <- read_docx()
+doc_J <- body_add_par(doc_J, "Tabella 3: Risultati del Modello di Regressione Beta sull'Indice di Evenness di Pielou (J') per l'anno 2025.", style = "Normal")
+doc_J <- body_add_flextable(doc_J, value = ft_J)
 
-# --- ESPORTAZIONE IN WORD (CORRETTO) ---
-doc <- read_docx() %>%
-  body_add_par("ANALISI INFERENZIALE DETTAGLIATA (DATI 2025)", style = "Normal") %>%
-  body_add_par("", style = "Normal") %>% # Sostituisce il vecchio spacer
-  
-  body_add_par("Tabella 1: Modello Lineare Generalizzato (Quasipoisson) per la Ricchezza di specie (S)", style = "heading 2") %>%
-  body_add_flextable(ft_S) %>% 
-  body_add_par("", style = "Normal") %>% # Riga vuota di distanziamento
-  
-  body_add_par("Tabella 2: Analisi della Covarianza (ANCOVA) per l'Indice di diversità di Shannon (H')", style = "heading 2") %>%
-  body_add_flextable(ft_H) %>% 
-  body_add_par("", style = "Normal") %>% # Riga vuota di distanziamento
-  
-  body_add_par("Tabella 3: Regressione Beta per l'Evenness di Pielou (J')", style = "heading 2") %>%
-  body_add_flextable(ft_J)
+print(doc_J, target = "C:/RTesi/tabella_3_evenness_J_2025.docx")
+print("--- TABELLA 3 WORD GENERATA CON SUCCESSO ---")
 
-# Salvataggio definitivo del file
-print(doc, target = "C:/RTesi/Tabelle_Separate_Diversita_2025.docx")
-print("Le 3 tabelle distinte sono state salvate con successo in Word!")
+
 
 
 # =====================================================================
@@ -675,6 +837,7 @@ print("Le 3 tabelle distinte sono state salvate con successo in Word!")
 
 library(ggplot2)
 library(patchwork)
+library(Hmisc)
 
 # =====================================================================
 # ---- CONFIGURAZIONE TEMA CLASSICO ED ELEGANTE ----
@@ -756,7 +919,7 @@ print("Grafico a barre classico salvato correttamente!")
 
 
 
-# =====================================================================
+  # =====================================================================
   # ---- PERMANOVA ----
   # =====================================================================
   
@@ -800,56 +963,6 @@ print("Grafico a barre classico salvato correttamente!")
   print(post_hoc_permanova)
 
 
-  # =====================================================================
-  # ---- ANOVA SULLE GUILDS----
-  # =====================================================================
-  
-  
-  # Calcolo la matrice comunità filtrando solo le specie "riparian - forestry  nesters", quelle che nidificano nella vegetazione arborea
-  specie_forestali<- specie %>%
-    filter(ID_SEGMENTO %in% seg_2025$ID_SEGMENTO, GUILD == "riparian - forestry  nesters") %>% # Verifica come è scritto nel foglio
-    group_by(ID_SEGMENTO, SPECIE) %>%
-    summarise(CONTEGGIO_TOT = sum(CONTEGGIO), .groups = "drop")
-  
-  matrice_specialisti <- specie_forestali %>%
-    pivot_wider(names_from = SPECIE, values_from = CONTEGGIO_TOT, values_fill = 0) %>%
-    column_to_rownames("ID_SEGMENTO")
-  
-  # Calcolo la ricchezza degli specialisti
-  indici_specialisti <- tibble(
-    ID_SEGMENTO = rownames(matrice_specialisti),
-    S_Specialisti = vegan::specnumber(matrice_specialisti)
-  )
-  
-  # Unisco al dataset e lancio l'ANOVA
-  dataset_specialisti <- dataset_analisi_1 %>%
-    left_join(indici_specialisti, by = "ID_SEGMENTO") %>%
-    mutate(S_Specialisti = replace_na(S_Specialisti, 0))
-  
-  anova_specialisti <- aov(S_Specialisti ~ NOME_TRATTO + NDVI, data = dataset_specialisti)
-  summary(anova_specialisti)
-  
-  # Calcolo le medie marginali stimate per gli specialisti forestali nei tre tratti
-  library(emmeans)
-  medie_specialisti <- emmeans(anova_specialisti, ~ NOME_TRATTO)
-  
-  # Mostro le medie (depurate dall'NDVI)
-  print("=== MEDIE STIMATE DEGLI SPECIALISTI PER TRATTO ===")
-  print(medie_specialisti)
-  
-  # Eseguo il confronto a coppie con correzione di Tukey
-  print("=== CONFRONTI POST-HOC SPECIALISTI (TUKEY) ===")
-  print(pairs(medie_specialisti, adjust = "tukey"))
-
-#      OUTPUT
- # contrast       estimate    SE df t.ratio p.value
- # Monte - Tagli    1.437 0.557 74   2.581  0.0314
- # Monte - Valle    1.889 0.627 74   3.012  0.0098
- # Tagli - Valle    0.452 0.532 74   0.849  0.6737
-
-# P value adjustment: tukey method for comparing a family of 3 estimates 
-  
-  
   
   # =====================================================================
   # ---- GRAFICO ANALISI DELLE COORDINATE PRINCIPALI (PCoA) ----
@@ -983,72 +1096,132 @@ print("Grafico a barre classico salvato correttamente!")
   print(doc_permanova, target = "C:/RTesi/tabella_permanova_completa.docx")
   print("--- TABELLA PERMANOVA GENERATA CON SUCCESSO IN C:/RTesi/tabella_permanova_completa.docx ---")#
 
-  # =====================================================================
-  # ---- GRAFICO  (BARRE ED ERRORE) ----
-  # =====================================================================
-  library(ggplot2)
-  library(dplyr)
-  library(stringr) # Necessario per str_wrap
+
+
+# =====================================================================
+#  GLM QUASIPOISSON PER GLI SPECIALISTI FORESTALI
+# =====================================================================
+
+
+
+library(tidyverse)
+library(car)
+library(emmeans)
+library(broom)
+library(flextable)
+library(officer)
+library(stringr)
   
-  # Testo della didascalia ottimizzato
-  testo_caption <- "Le barre rappresentano il numero medio di specie per segmento ± l'Intervallo di Confidenza (95% CI). Lettere diverse (a, b) indicano differenze statisticamente significative al test di Tukey (p < 0,05)."
+# Calcolo la matrice comunità filtrando solo le specie "riparian - forestry  nesters", quelle che nidificano nella vegetazione arborea
+specie_forestali<- specie %>%
+    filter(ID_SEGMENTO %in% seg_2025$ID_SEGMENTO, GUILD == "riparian - forestry  nesters") %>% # Verifica come è scritto nel foglio
+     group_by(ID_SEGMENTO, SPECIE) %>%
+     summarise(CONTEGGIO_TOT = sum(CONTEGGIO), .groups = "drop")
   
-  grafico_barre <- ggplot(dataset_specialisti, aes(x = NOME_TRATTO, y = S_Specialisti, fill = NOME_TRATTO)) +
-    # Barre con la MEDIA
-    stat_summary(
-      fun = mean, 
-      geom = "bar", 
-      alpha = 0.8, 
-      width = 0.5, 
-      color = "black", 
-      linewidth = 0.4
-    ) +
-    # Linee di Errore (IC 95%)
-    stat_summary(
-      fun.data = mean_cl_normal, 
-      geom = "errorbar", 
-      width = 0.15, 
-      color = "black", 
-      linewidth = 0.8
-    ) +
-    # Lettere del test post-hoc (Tukey)
-    annotate("text", x = 1, y = max(dataset_specialisti$S_Specialisti) + 0.5, label = "a", size = 6, fontface = "bold", color = "#2ca02c") +
-    annotate("text", x = 2, y = max(dataset_specialisti$S_Specialisti) + 0.5, label = "b", size = 6, fontface = "bold", color = "black") +
-    annotate("text", x = 3, y = max(dataset_specialisti$S_Specialisti) + 0.5, label = "b", size = 6, fontface = "bold", color = "black") +
-    # Palette di colori
-    scale_fill_manual(values = c("Monte" = "#66c2a5", "Tagli" = "#fc8d62", "Valle" = "#8da0cb")) +
-    # Assi e scritte con str_wrap impostato a 60 caratteri per riga
-    labs(
-      title = "Ricchezza di specie 'specialiste' della fascia ripariale per tratto",
-      subtitle = "Guld: 'avifauna nidificante nella fascia ripariale' (ANCOVA: p < 0,001)",
-      x = "Tratto di fiume monitorato",
-      y = "N° Medio di specie per segmento",
-      # Portando width a 60 il blocco di testo diventa più stretto e verticale, evitando i tagli
-      caption = str_wrap(testo_caption, width = 60)
-    ) +
-    # Tema essenziale
-    theme_classic(base_size = 14) +
-    theme(
-      plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
-      plot.subtitle = element_text(face = "italic", size = 11, color = "dimgray", hjust = 0.5, margin = margin(b = 15)),
-      axis.text.x = element_text(size = 12, face = "bold", color = "black"),
-      axis.text.y = element_text(size = 11, color = "black"),
-      # lineheight = 1.2 imposta la corretta spaziatura verticale tra le righe spezzate della caption
-      plot.caption = element_text(size = 10, face = "italic", color = "dimgray", hjust = 0, lineheight = 1.2, margin = margin(t = 12)),
-      legend.position = "none",
-      panel.grid.major.y = element_line(color = "gray95", linetype = "solid")
-    )
-  
-  # Visualizza nell'anteprima
-  print(grafico_barre)
-  
-  # Salva l'immagine in HD (R adatterà i margini automatici basandosi sul nuovo formato della caption)
-  ggsave(
-    filename = "C:/RTesi/Grafico_Intuitivo_Specialisti_2025.png",
-    plot = grafico_barre,
-    width = 7,
-    height = 5.8, # Ho alzato leggermente l'altezza per dare spazio alle righe in più della didascalia
-    dpi = 300
+matrice_specialisti <- specie_forestali %>%
+     pivot_wider(names_from = SPECIE, values_from = CONTEGGIO_TOT, values_fill = 0) %>%
+     column_to_rownames("ID_SEGMENTO")
+   
+# Calcolo la ricchezza degli specialisti
+   indici_specialisti <- tibble(
+     ID_SEGMENTO = rownames(matrice_specialisti),
+     S_Specialisti = vegan::specnumber(matrice_specialisti)
+   )
+
+glm_specialisti <- glm(S_Specialisti ~ NOME_TRATTO + NDVI, 
+                       family = quasipoisson(link = "log"), 
+                       data = dataset_specialisti)
+
+# Test globale di Tipo III
+print("--- ANOVA TIPO III SPECIALISTI ---")
+Anova(glm_specialisti, type = "III")
+
+# OUTPUT
+#            LR Chisq Df Pr(>Chisq)   
+# NOME_TRATTO  10.3044  2   0.005787 **
+# NDVI          0.8362  1   0.360482   
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+ 
+
+
+# Medie stimate e Post-Hoc di Tukey (scala reale)
+medie_gls_spec <- emmeans(glm_specialisti, ~ NOME_TRATTO, type = "response")
+confronti_spec <- pairs(medie_gls_spec, adjust = "tukey")
+print(confronti_spec)
+
+# OUTPUT
+ # contrast      ratio     SE  df null z.ratio p.value
+ # Monte / Tagli  1.21 0.0830 Inf    1   2.827  0.0130
+ # Monte / Valle  1.26 0.1140 Inf    1   2.577  0.0269
+ # Tagli / Valle  1.04 0.0909 Inf    1   0.446  0.8960
+
+
+
+dati_tabella_spec <- tidy(glm_specialisti) %>%
+  mutate(term = case_when(
+    term == "(Intercept)" ~ "Intercetta (Monte)",
+    term == "NOME_TRATTOTagli" ~ "Tratto: Tagli",
+    term == "NOME_TRATTOValle" ~ "Tratto: Valle",
+    term == "NDVI" ~ "NDVI (Covariata)",
+    TRUE ~ term
+  )) %>%
+  mutate(
+    Signif = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE            ~ "NS"
+    ),
+    p.value = if_else(p.value < 0.001, "< 0,001", as.character(round(p.value, 4)))
+  ) %>%
+  select(term, estimate, std.error, statistic, p.value, Signif)
+
+ft_spec <- flextable(dati_tabella_spec) %>%
+  set_header_labels(term = "Variabile / Predittore", estimate = "Stima (β)", std.error = "SE", statistic = "Valore t", p.value = "p-value", Signif = "Signif.") %>%
+  colformat_double(j = c("estimate", "std.error", "statistic"), digits = 3, decimal.mark = ",", big.mark = "") %>%
+  theme_booktabs() %>% autofit() %>% bold(part = "header") %>%
+  flextable::align(align = "center", part = "all") %>% flextable::align(j = "term", align = "left", part = "all")
+
+doc_spec <- read_docx()
+doc_spec <- body_add_par(doc_spec, "Tabella 10: Risultati del GLM Quasipoisson sulla ricchezza di specialisti forestali ripariali (2025).", style = "Normal")
+doc_spec <- body_add_flextable(doc_spec, value = ft_spec)
+print(doc_spec, target = "C:/RTesi/tabella_10_specialisti_2025.docx")
+
+
+# =====================================================================
+#  GRAFICO OTTIMIZZATO (CON SPAZIATURA ASSE Y PER LE LETTERE)
+# =====================================================================
+testo_caption <- "Le barre rappresentano il numero medio di specie per segmento ± l'Intervallo di Confidenza (95% CI). Lettere diverse (a, b) indicano differenze statisticamente significative al test di Tukey (p < 0,05)."
+
+# Calcolo il massimo valore reale per posizionare le lettere in modo sicuro
+y_max_dati <- max(dataset_specialisti$S_Specialisti)
+
+grafico_barre <- ggplot(dataset_specialisti, aes(x = NOME_TRATTO, y = S_Specialisti, fill = NOME_TRATTO)) +
+  stat_summary(fun = mean, geom = "bar", alpha = 0.8, width = 0.5, color = "black", linewidth = 0.4) +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.15, color = "black", linewidth = 0.8) +
+  # Posizionamento dinamico sicuro delle lettere
+  annotate("text", x = 1, y = y_max_dati + 0.8, label = "a", size = 5.5, fontface = "bold", color = "#2ca02c") +
+  annotate("text", x = 2, y = y_max_dati + 0.8, label = "b", size = 5.5, fontface = "bold", color = "black") +
+  annotate("text", x = 3, y = y_max_dati + 0.8, label = "b", size = 5.5, fontface = "bold", color = "black") +
+  scale_fill_manual(values = c("Monte" = "#66c2a5", "Tagli" = "#fc8d62", "Valle" = "#8da0cb")) +
+  # Espando leggermente l'asse Y verso l'alto per non tagliare le lettere fuori dal margine
+  scale_y_continuous(limits = c(0, y_max_dati + 1.5)) +
+  labs(
+    title = "Ricchezza di specie 'specialiste' della fascia ripariale per tratto",
+    subtitle = "Guild: 'riparian - forestry nesters' (GLM Quasipoisson: p < 0,001)",
+    x = "Tratto di fiume monitorato",
+    y = "N° Medio di specie per segmento",
+    caption = str_wrap(testo_caption, width = 60)
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", size = 11, color = "dimgray", hjust = 0.5, margin = margin(b = 15)),
+    axis.text.x = element_text(size = 12, face = "bold", color = "black"),
+    axis.text.y = element_text(size = 11, color = "black"),
+    plot.caption = element_text(size = 9.5, face = "italic", color = "dimgray", hjust = 0, lineheight = 1.2, margin = margin(t = 12)),
+    legend.position = "none",
+    panel.grid.major.y = element_line(color = "gray95", linetype = "solid")
   )
-  
-  print("--- GRAFICO CON DIDASCALIA CORRETTA SALVATO CON SUCCESSO! ---")
+
+ggsave(filename = "C:/RTesi/Grafico_Specialisti_2025.png", plot = grafico_barre, width = 7, height = 6.2, dpi = 300)
