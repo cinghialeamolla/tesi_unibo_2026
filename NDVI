@@ -114,3 +114,216 @@ write.csv2(ndvi_totale_lineare, "NDVI_Finali_Segmenti_Tesi.csv", row.names = FAL
 print("--> SUCCESS: Tabella finale esportata in 'NDVI_Finali_Segmenti.csv'!")
 
 
+
+# =====================================================================
+# ---- ANALISI NDVI (2025) ----
+# =====================================================================
+
+
+## ---- packages ----
+#  install.packages("tidyverse")
+#  install.packages("readxl")
+#  install.packages("vegan")
+#  install.packages("car")
+#  install.packages("MASS")
+#  install.packages("emmeans")
+#  install.packages("patchwork")
+#  install.packages("ggdist")
+#  install.packages("GGally")
+#  install.packages("flextable")
+
+{
+  library(readxl)
+  library(vegan) # per il calcolo degli indici ecologici
+  library(car) # per il test di Levene (omogeneità delle varianze)
+  library(MASS) # per glm.nb()
+  library(tidyverse)
+  library(emmeans) # per i confronti post-hoc dei GLM
+  library(dplyr)
+  library(flextable)
+  library(patchwork)
+  library(nlme)
+  library(ggdist)
+  library(officer)
+}
+
+# Ho dovuto risolvere un probema di conflitto tra pacchetti istallati sul mio R
+library(conflicted)
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+
+
+## ---- load data ----
+setwd("C:/RTesi")
+
+{
+  specie <- readxl::read_xlsx(
+    "C:/RTesi/dati_ombrone_provvisori.xlsx",
+    sheet = "Contatti_Specie"
+  )
+  segmenti <- readxl::read_xlsx(
+    "C:/RTesi/dati_ombrone_provvisori.xlsx",
+    sheet = "Segmenti"
+  )
+}
+
+## ---- data preparation ----
+{
+  # Filtriamo i segmenti del 2025
+  seg_2025 <- segmenti %>%
+    filter(ANNO == 2025)
+
+  # Filtriamo i contatti del 2025 e aggreghiamo per segmento (sommando le sponde)
+  # per avere il dato totale del segmento da confrontare tra i tre tratti
+  specie_2025 <- specie %>%
+    filter(ID_SEGMENTO %in% seg_2025$ID_SEGMENTO) %>%
+    group_by(ID_SEGMENTO, SPECIE) %>%
+    summarise(CONTEGGIO_TOT = sum(CONTEGGIO), .groups = "drop")
+
+  # Trasformiamo in formato WIDE (Siti x Specie) per il pacchetto vegan
+  matrice_comunita <- specie_2025 %>%
+    pivot_wider(
+      names_from = SPECIE,
+      values_from = CONTEGGIO_TOT,
+      values_fill = 0
+    ) %>%
+    column_to_rownames("ID_SEGMENTO")
+}
+
+
+# =====================================================================
+# ---- TABELLA NDVI PER TRATTO (2025) ----
+# =====================================================================
+
+# Trasformo la colonna NDVI da "carattere" a "numerica" prima del calcolo
+seg_2025_corretto <- seg_2025 %>%
+  mutate(NDVI = as.numeric(as.character(NDVI))) 
+
+# Ricalcolo delle statistiche descrittive
+tabella_ndvi_dati <- seg_2025_corretto %>%
+  group_by(NOME_TRATTO) %>%
+  summarise(
+    Numero_Segmenti = n(),
+    NDVI_Medio      = mean(NDVI, na.rm = TRUE),
+    Deviazione_Std  = sd(NDVI, na.rm = TRUE),
+    Minimo          = min(NDVI, na.rm = TRUE),
+    Massimo         = max(NDVI, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Creo la tabella risolvendo il conflitto di 'align'
+# Uso flextable::align per dire a R di ignorare il pacchetto terra in questo blocco (altrimenti continua a dare errori di conflitto)
+
+tabella_completa <- flextable(tabella_ndvi_dati) %>%
+  set_header_labels(
+    NOME_TRATTO     = "Tratto di Fiume",
+    Numero_Segmenti = "N° Segmenti",
+    NDVI_Medio      = "NDVI Medio",
+    Deviazione_Std  = "Deviazione Standard",
+    Minimo          = "Min",
+    Massimo         = "Max"
+  ) %>%
+  # Rimuovo completamente i separatori delle migliaia per evitare conflitti con le impostazioni di sistema
+  # continuava a dari dei warning
+  colformat_double(digits = 3, decimal.mark = ",", big.mark = "") %>% 
+  colformat_int(j = "Numero_Segmenti", big.mark = "") %>% 
+  theme_booktabs() %>%                
+  autofit() %>%                       
+  bold(part = "header") %>%           
+  flextable::align(align = "center", part = "all") %>% 
+  flextable::align(j = "NOME_TRATTO", align = "left", part = "all")
+
+
+# La esporto in word
+library(officer)
+doc_ndvi <- read_docx()
+doc_ndvi <- body_add_par(doc_ndvi, "Tabella: Statistiche descrittive dell'NDVI nei tre tratti monitorati (Anno 2025)", style = "heading 2")
+doc_ndvi <- body_add_flextable(doc_ndvi, value = tabella_completa)
+
+print(doc_ndvi, target = "C:/RTesi/tabella_medie_ndvi_2025.docx")
+print("--- TABELLA WORD GENERATA CON SUCCESSO ---")
+
+
+
+# =====================================================================
+# ---- ANOVA PER NDVI (2025) ----
+# =====================================================================
+
+anova_NDVI <- lm(NDVI ~ NOME_TRATTO, data = seg_2025_corretto)
+print(summary(anova_NDVI))
+
+
+# verifica degli assunti dell'ANOVA: importante, da fare prima di guardare i risultati!
+# perché se gli assunti non sono rispettati dobbiamo passare al blocco di analisi successivo
+shapiro.test(residuals(anova_NDVI)) # p-value = 0.4603, è superiore a 0,05, significa che è i residui sono normali
+
+levene_S <- leveneTest(NDVI ~ NOME_TRATTO, data = seg_2025_corretto)
+print(levene_S) # p-value=0.005068 < p-vaue 0,05; quindi le varianze non sono omogenee
+
+# DEVO USARE UN ALTRO MODELLO PER L'ANOVA
+
+# Imposto il modello "Generalized Linear Models"
+gls_ndvi <- gls(NDVI ~ NOME_TRATTO, 
+                        data = seg_2025_corretto, 
+                        weights = varIdent(form = ~ 1 | NOME_TRATTO))
+
+Anova(gls_ndvi, type = "III")
+
+# Calcolo dei confronti post-hoc di Tukey per varianze diverse
+confronti_posthoc <- emmeans(gls_ndvi, pairwise ~ NOME_TRATTO, adjust = "tukey")
+
+# VisualizzO i risultati dei contrasti a coppie
+print(confronti_posthoc$contrasts)
+
+# OUTPUT p.value
+# Monte - Tagli   p.value <0.0001 > 0.05
+# Monte - Valle   p.value <0.0001 < 0.05
+# Tagli - Valle   p.value <0.0001 < 0.05
+
+
+# =====================================================================
+# CEAZIONE TABELLA
+# =====================================================================
+
+
+# Trasformo l'oggetto emmeans in un dataframe pulito
+df_contrasti <- as.data.frame(confronti_posthoc$contrasts)
+
+#  Creo la tabella con flextable impostando i parametri anti-warning
+tabella_word_contrasti <- flextable(df_contrasti) %>%
+  set_header_labels(
+    contrast = "Confronto Tratti",
+    estimate = "Stima Diff.",
+    SE       = "Errore Standard (SE)",
+    df       = "g.l. (Satterthwaite)",
+    t.ratio  = "Valore t",
+    p.value  = "p-value"
+  ) %>%
+  # big.mark = "" evita i conflitti con la virgola decimale nei sistemi italiani
+  colformat_double(digits = 4, decimal.mark = ",", big.mark = "") %>%
+  # Gestione specifica dei p-value  (< 0,0001)
+  colformat_double(j = "p.value", digits = 4, decimal.mark = ",", na_str = "") %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  bold(part = "header") %>%
+  flextable::align(align = "center", part = "all") %>%
+  flextable::align(j = "contrast", align = "left", part = "all")
+
+#  Creo un nuovo documento Word separato
+doc_contrasti <- read_docx()
+
+# Aggiungo il titolo del paragrafo/tabella
+doc_contrasti <- body_add_par(
+  doc_contrasti, 
+  "Tabella 1.2: Contrasti post-hoc di Tukey (metodo GLS) per i valori di NDVI (Anno 2025)", 
+  style = "heading 2"
+)
+
+# Inserisco la tabella appena creata
+doc_contrasti <- body_add_flextable(doc_contrasti, value = tabella_word_contrasti)
+
+# Salvo il file
+print(doc_contrasti, target = "C:/RTesi/tabella_contrasti_ndvi_2025.docx")
+
+print("--- FILE WORD SEPARATO GENERATO CON SUCCESSO IN C:/RTesi/tabella_contrasti_ndvi_2025.docx ---")
+
