@@ -107,3 +107,97 @@ risultato_Tintorno$NDVI_Buffer_2025 <- ext_T2025[, 2]
 write.csv2(risultato_Tintorno, "valori_ndvi_tagli_buffer_100m.csv", row.names = FALSE)
 
 
+
+
+
+
+##### METODO CORRETTO FINALE
+# =====================================================================
+# ESTRAZIONE NDVI SU BUFFER DEI SEGMENTI REALI
+# =====================================================================
+
+library(terra)
+library(tidyverse)
+
+setwd("C:/RTesi")
+
+# GENERAZIONE DEI RASTER NDVI -------
+
+# --- LANDSAT 8 (2013) - PIXEL 30m
+b4_2013 <- rast("16_giugno_2013_LC08_B4.TIF") 
+b5_2013 <- rast("16_giugno_2013_LC08_B5.TIF") 
+ndvi_2013 <- (b5_2013 - b4_2013) / (b5_2013 + b4_2013)
+
+# --- SENTINEL-2 (2025) - PIXEL 10m
+b4_2025 <- rast("24_maggio_2025_Sentinel-2_L2A_B04_(Raw).tiff") 
+b8_2025 <- rast("24_maggio_2025_Sentinel-2_L2A_B08_(Raw).tiff") 
+ndvi_2025_10m <- (b8_2025 - b4_2025) / (b8_2025 + b4_2025)
+
+# --- SENTINEL-2 (2025 Tagli) - Allineamento geometrico bande - PIXEL 10m
+b4_T2025 <- rast("Tagli_2025_Sentinel-2_L2A_B04_(Raw).tiff") 
+b8_T2025 <- rast("Tagli_2025_Sentinel-2_L2A_B08_(Raw).tiff") 
+b4_T2025_allineata <- resample(b4_T2025, b8_T2025, method = "bilinear")
+ndvi_T2025_10m <- (b8_T2025 - b4_T2025_allineata) / (b8_T2025 + b4_T2025_allineata)
+
+# MASCHERAMENTO ACQUA STANDARD (NDVI <= 0.1 -> NA) -------------------------
+ndvi_2013_veg <- ifel(ndvi_2013 <= 0.1, NA, ndvi_2013)
+ndvi_2025_veg <- ifel(ndvi_2025_10m <= 0.1, NA, ndvi_2025_10m)
+ndvi_T2025_veg <- ifel(ndvi_T2025_10m <= 0.1, NA, ndvi_T2025_10m)
+
+
+
+#  CARICO I VETTORI SHAPEFILE -----------------------------------------------
+seg_2013_v <- vect("Tratti_2013.shp")
+seg_2025_v <- vect("Tratti_2025.shp")
+
+# GENERO I BUFFER REALI -----------------------------------------
+buf_2013 <- buffer(seg_2013_v, width = 50)
+buf_2025 <- buffer(seg_2025_v, width = 50)
+
+
+# ANNO 2013: ESTRAZIONE STANDARD ------------------------------------
+buf_2013_proj <- project(buf_2013, crs(ndvi_2013_veg))
+ext_2013      <- terra::extract(ndvi_2013_veg, buf_2013_proj, fun = mean, na.rm = TRUE)
+
+ndvi_2013_df  <- data.frame(
+  ID_SEGM = buf_2013$ID_SEGM,
+  NDVI    = ext_2013[, 2],
+  ANNO    = 2013
+)
+
+
+# ANNO 2025: SPLIT TRA TRATTI STANDARD E TRATTO TAGLI ---------------
+# Uso i filtri testuali sull'ID_SEGM o sul nome del tratto per separarli.
+
+# Separazione dei buffer 2025
+buf_2025_tagli    <- buf_2025[grepl("T3", buf_2025$ID_SEGM), ]  # Filtra i segmenti con la 'T3' di Tagli
+buf_2025_standard <- buf_2025[!grepl("T3", buf_2025$ID_SEGM), ] # Tutti gli altri (Valle, Monte)
+
+
+# Estrazione per Tratti Standard 2025 (Valle e Monte)
+buf_2025_std_proj <- project(buf_2025_standard, crs(ndvi_2025_veg))
+ext_2025_std      <- terra::extract(ndvi_2025_veg, buf_2025_std_proj, fun = mean, na.rm = TRUE)
+
+ndvi_2025_std_df  <- data.frame(
+  ID_SEGM = buf_2025_standard$ID_SEGM,
+  NDVI    = ext_2025_std[, 2],
+  ANNO    = 2025
+)
+
+# Estrazione per Tratto Tagli 2025 
+buf_2025_tag_proj <- project(buf_2025_tagli, crs(ndvi_T2025_veg))
+ext_2025_tag      <- terra::extract(ndvi_T2025_veg, buf_2025_tag_proj, fun = mean, na.rm = TRUE)
+
+ndvi_2025_tag_df  <- data.frame(
+  ID_SEGM = buf_2025_tagli$ID_SEGM,
+  NDVI    = ext_2025_tag[, 2],
+  ANNO    = 2025
+)
+
+
+# UNIONE COMPLETA DEI TRE DATASET -----------------------------------
+ndvi_totale_lineare <- bind_rows(ndvi_2013_df, ndvi_2025_std_df, ndvi_2025_tag_df) %>% 
+  mutate(ID_SEGM = str_trim(ID_SEGM))
+
+# Salvataggio del file finale pulito
+write.csv2(ndvi_totale_lineare, "NDVI_Finali_Segmenti_Tesi.csv", row.names = FALSE)
