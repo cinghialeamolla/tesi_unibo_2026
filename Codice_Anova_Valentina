@@ -35,9 +35,10 @@
   library(ggdist)
   library(betareg)
   library(officer)
-  library(ggplot2)
+  library(ggplot2)  # per i vari grafici
   library(Hmisc)
-
+  library(broom)
+  library(stringr)
 }
 
 # Ho dovuto risolvere un probema di conflitto tra pacchetti istallati sul mio R
@@ -659,10 +660,6 @@ print("--- TABELLA J' GENERATA CON VALORI REALI IN WORD ---")
 # ---- CREAZIONE GRAFICO ----
 # =====================================================================
 
-
-# =====================================================================
-# ---- CONFIGURAZIONE TEMA CLASSICO ED ELEGANTE ----
-# =====================================================================
 tema_semplice <- theme_minimal(base_size = 13) +
   theme(
     plot.title = element_text(face = "bold", size = 12, hjust = 0.5, margin = margin(b = 10)),
@@ -920,17 +917,8 @@ print("Grafico a barre classico salvato correttamente!")
 
 
 # =====================================================================
-#  GLM QUASIPOISSON PER GLI SPECIALISTI FORESTALI
+# ---- GLM SULLE GUILDS (Specialisti Forestali) ----
 # =====================================================================
-
-library(tidyverse)
-library(car)
-library(emmeans)
-library(broom)
-library(flextable)
-library(officer)
-library(stringr)
-
 
 # Calcolo la matrice comunità filtrando solo le specie "riparian - forestry  nesters", quelle che nidificano nella vegetazione arborea
 specie_forestali <- specie %>%
@@ -957,67 +945,88 @@ dataset_specialisti <- seg_2025_corretto %>%
   # Se in un segmento non è stato visto alcuno specialista, la ricchezza deve essere 0 e non NA
   mutate(S_Specialisti = replace_na(S_Specialisti, 0))
 
-# 5. ESECUZIONE DEL MODELLO GLM QUASIPOISSON
-glm_specialisti <- glm(S_Specialisti ~ NOME_TRATTO + NDVI, 
-                       family = quasipoisson(link = "log"), 
-                       data = dataset_specialisti)
 
+# Costruisco il modello di base (Poisson)
+glm_specialisti_pois <- glm(S_Specialisti ~ NOME_TRATTO + NDVI,
+                            family = poisson(link = "log"),
+                            data = dataset_specialisti)
 
-# Test globale di Tipo III
-print("--- ANOVA TIPO III SPECIALISTI ---")
-Anova(glm_specialisti, type = "III")
+# Controllo rapido della dispersione
+ratio_disp_spec <- glm_specialisti_pois$deviance / glm_specialisti_pois$df.residual
 
-# OUTPUT
-#            LR   Chisq     Df     Pr(>Chisq)   
-#  NOME_TRATTO     16.516    2    0.0002592 ***
-#  NDVI             0.005    1    0.9433773  
-# Signif. codes:    0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+if (ratio_disp_spec > 1.3) {
+  glm_specialisti_finale <- glm.nb(S_Specialisti ~ NOME_TRATTO + NDVI, data = dataset_specialisti)
+} else if (ratio_disp_spec < 0.7) {
+  glm_specialisti_finale <- glm(S_Specialisti ~ NOME_TRATTO + NDVI, family = quasipoisson(link = "log"), data = dataset_specialisti)
+} else {
+  glm_specialisti_finale <- glm_specialisti_pois
+}
 
-# Medie stimate e Post-Hoc di Tukey (scala reale)
-medie_gls_spec <- emmeans(glm_specialisti, ~ NOME_TRATTO, type = "response")
-confronti_spec <- pairs(medie_gls_spec, adjust = "tukey")
-print(confronti_spec)
+summary(glm_specialisti_finale)
 
-
-# OUTPUT
-# contrast         ratio      SE    df   null   z.ratio   p.value
- # Monte / Tagli   1.22    0.0951   Inf    1     2.554    0.0287
- # Monte / Valle   1.34    0.1280   Inf    1     3.065    0.0062
- # Tagli / Valle   1.10    0.1390   Inf    1     0.737    0.7413
+# Post-hoc con emmeans (restituito sulla scala reale dei conteggi)
+library(emmeans)
+medie_specialisti <- emmeans(glm_specialisti_finale, ~ NOME_TRATTO, type = "response")
+print(pairs(medie_specialisti))
 
 
 
+# =====================================================================
+# GENERAZIONE TABELLE WORD: GILDA SPECIALISTI FORESTALI (2025)
+# =====================================================================
 
+# Recupero i gradi di libertà residui reali 
+gl_residui_spec <- glm_specialisti_finale$df.residual
 
-dati_tabella_spec <- tidy(glm_specialisti) %>%
-  mutate(term = case_when(
-    term == "(Intercept)" ~ "Intercetta (Monte)",
-    term == "NOME_TRATTOTagli" ~ "Tratto: Tagli",
-    term == "NOME_TRATTOValle" ~ "Tratto: Valle",
-    term == "NDVI" ~ "NDVI (Covariata)",
-    TRUE ~ term
-  )) %>%
-  mutate(
-    Signif = case_when(
-      p.value < 0.001 ~ "***",
-      p.value < 0.01  ~ "**",
-      p.value < 0.05  ~ "*",
-      TRUE            ~ "NS"
-    ),
-    p.value = if_else(p.value < 0.001, "< 0,001", as.character(round(p.value, 4)))
-  ) %>%
-  select(term, estimate, std.error, statistic, p.value, Signif)
+# --- ESTRAZIONE E SCRITTURA TABELLA COEFFICIENTI (MODELLO) ---
+summary_spec <- summary(glm_specialisti_finale)
+coeff_spec <- summary_spec$coefficients
 
-ft_spec <- flextable(dati_tabella_spec) %>%
-  set_header_labels(term = "Variabile / Predittore", estimate = "Stima (β)", std.error = "SE", statistic = "Valore t", p.value = "p-value", Signif = "Signif.") %>%
-  colformat_double(j = c("estimate", "std.error", "statistic"), digits = 3, decimal.mark = ",", big.mark = "") %>%
+df_modello_spec <- tibble(
+  Parametro  = c("Intercetta (Monte)", "Tratto: Tagli", "Tratto: Valle", "NDVI (Covariata)"),
+  Stima      = coeff_spec[, "Estimate"],
+  Err_Std    = coeff_spec[, "Std. Error"],
+  Statistica = coeff_spec[, "t value"],
+  p_value    = coeff_spec[, "Pr(>|t|)"]
+)
+
+tab_modello_word <- flextable(df_modello_spec) %>%
+  set_header_labels(Parametro = "Parametro", Stima = "Stima (Coef.)", Err_Std = "Err. Std.", Statistica = "Statistica (t)", p_value = "p-value") %>%
+  colformat_double(j = c("Stima", "Err_Std", "Statistica"), digits = 3, decimal.mark = ",", big.mark = "") %>%
+  colformat_double(j = "p_value", digits = 4, decimal.mark = ",", big.mark = "") %>%
+  labelizor(j = "p_value", labels = c("0.0000" = "< 0,0001"), part = "body") %>%
   theme_booktabs() %>% autofit() %>% bold(part = "header") %>%
-  flextable::align(align = "center", part = "all") %>% flextable::align(j = "term", align = "left", part = "all")
+  flextable::align(align = "center", part = "all") %>% flextable::align(j = "Parametro", align = "left", part = "all")
 
-doc_spec <- read_docx()
-doc_spec <- body_add_par(doc_spec, "Tabella 10: Risultati del GLM Quasipoisson sulla ricchezza di specialisti forestali ripariali (2025).", style = "Normal")
-doc_spec <- body_add_flextable(doc_spec, value = ft_spec)
-print(doc_spec, target = "C:/RTesi/tabella_10_specialisti_2025.docx")
+
+# --- CALCOLO E SCRITTURA TABELLA POST-HOC (TEST t) ---
+medie_specialisti_t <- emmeans(glm_specialisti_finale, ~ NOME_TRATTO, type = "response", df = gl_residui_spec)
+contrasti_spec_t <- pairs(medie_specialisti_t)
+
+df_contrasti_spec <- as.data.frame(contrasti_spec_t)
+
+tab_contrasti_word <- flextable(df_contrasti_spec) %>%
+  set_header_labels(contrast = "Confronto Tratti", ratio = "Rapporto Medie (Ratio)", SE = "Err. Std. (SE)", df = "g.l.", t.ratio = "Valore t", p.value = "p-value") %>%
+  colformat_double(j = c("ratio", "SE", "t.ratio"), digits = 3, decimal.mark = ",", big.mark = "") %>%
+  colformat_int(j = "df", big.mark = "") %>%
+  colformat_double(j = "p.value", digits = 4, decimal.mark = ",", big.mark = "") %>%
+  theme_booktabs() %>% autofit() %>% bold(part = "header") %>%
+  flextable::align(align = "center", part = "all") %>% flextable::align(j = "contrast", align = "left", part = "all")
+
+
+# --- ESPORTAZIONE UNICA IN WORD ---
+doc_gilde <- read_docx()
+
+doc_gilde <- body_add_par(doc_gilde, "Tabella 11 - Risultati del GLM Quasipoisson per la Ricchezza degli Specialisti Forestali Ripariali (Anno 2025).", style = "Normal")
+doc_gilde <- body_add_flextable(doc_gilde, value = tab_modello_word)
+doc_gilde <- body_add_par(doc_gilde, "\n") # Spazio vuoto
+
+doc_gilde <- body_add_par(doc_gilde, "Tabella 12 - Contrasti post-hoc di Tukey (distribuzione t) per la Ricchezza degli Specialisti Forestali Ripariali (Anno 2025).", style = "Normal")
+doc_gilde <- body_add_flextable(doc_gilde, value = tab_contrasti_word)
+
+print(doc_gilde, target = "C:/RTesi/Tabelle_Specialisti_Forestali_2025.docx")
+print("--- TABELLE DEGLI SPECIALISTI FORESTALI GENERATE CON SUCCESSO ---")
+
 
 
 # =====================================================================
