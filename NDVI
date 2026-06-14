@@ -116,88 +116,108 @@ write.csv2(risultato_Tintorno, "valori_ndvi_tagli_buffer_100m.csv", row.names = 
 # ESTRAZIONE NDVI SU BUFFER DEI SEGMENTI REALI
 # =====================================================================
 
-library(terra)
-library(tidyverse)
-
-setwd("C:/RTesi")
-
-# GENERAZIONE DEI RASTER NDVI -------
-
-# --- LANDSAT 8 (2013) - PIXEL 30m
+# --- LANDSAT 8 (2013) - Pixel 30m 
 b4_2013 <- rast("16_giugno_2013_LC08_B4.TIF") 
 b5_2013 <- rast("16_giugno_2013_LC08_B5.TIF") 
 ndvi_2013 <- (b5_2013 - b4_2013) / (b5_2013 + b4_2013)
 
-# --- SENTINEL-2 (2025) - PIXEL 10m
+# --- SENTINEL-2 STANDARD (2025) - Pixel 10m
 b4_2025 <- rast("24_maggio_2025_Sentinel-2_L2A_B04_(Raw).tiff") 
 b8_2025 <- rast("24_maggio_2025_Sentinel-2_L2A_B08_(Raw).tiff") 
 ndvi_2025_10m <- (b8_2025 - b4_2025) / (b8_2025 + b4_2025)
 
-# --- SENTINEL-2 (2025 Tagli) - Allineamento geometrico bande - PIXEL 10m
+# --- SENTINEL-2 TAGLI (2025) - Pixel 10m
 b4_T2025 <- rast("Tagli_2025_Sentinel-2_L2A_B04_(Raw).tiff") 
 b8_T2025 <- rast("Tagli_2025_Sentinel-2_L2A_B08_(Raw).tiff") 
+
+# Allineamento geometrico preliminare delle bande a 10m  
+# mi dava un errore di disallineamento delle immagini
 b4_T2025_allineata <- resample(b4_T2025, b8_T2025, method = "bilinear")
-ndvi_T2025_10m <- (b8_T2025 - b4_T2025_allineata) / (b8_T2025 + b4_T2025_allineata)
-
-# MASCHERAMENTO ACQUA STANDARD (NDVI <= 0.1 -> NA) -------------------------
-ndvi_2013_veg <- ifel(ndvi_2013 <= 0.1, NA, ndvi_2013)
-ndvi_2025_veg <- ifel(ndvi_2025_10m <= 0.1, NA, ndvi_2025_10m)
-ndvi_T2025_veg <- ifel(ndvi_T2025_10m <= 0.1, NA, ndvi_T2025_10m)
+ndvi_T2025_10m    <- (b8_T2025 - b4_T2025_allineata) / (b8_T2025 + b4_T2025_allineata)
 
 
+# --- UNIFORMITÀ DELLA RISOLUZIONE SPAZIALE A 30 METRI ----
+# Non uso ndvi_2013 come stampo per l'estensione, perchè il tratto Tagli ricade in un'area non coperta dal raster del 2013
+# Cambio solo il CRS e forzo la risoluzione a 30m per non tagliare i bordi del T3.
+print("Riproiezione e ricampionamento a 30m con estensione nativa preservata...")
 
-#  CARICO I VETTORI SHAPEFILE -----------------------------------------------
+ndvi_2025_30m  <- project(ndvi_2025_10m, crs(b4_2013), res = 30, method = "bilinear")
+ndvi_T2025_30m <- project(ndvi_T2025_10m, crs(b4_2013), res = 30, method = "bilinear")
+
+
+# --- MASCHERAMENTO ACQUA STANDARD (NDVI <= 0.1 -> NA) ---------------
+# Isolo i pixel di sola vegetazione
+ndvi_2013_veg  <- ifel(ndvi_2013 <= 0.1, NA, ndvi_2013)
+ndvi_2025_veg  <- ifel(ndvi_2025_30m <= 0.1, NA, ndvi_2025_30m)
+ndvi_T2025_veg <- ifel(ndvi_T2025_30m <= 0.1, NA, ndvi_T2025_30m)
+
+
+# --- CARICAMENTO SHAPEFILE E GENERAZIONE BUFFER DA 50M
 seg_2013_v <- vect("Tratti_2013.shp")
 seg_2025_v <- vect("Tratti_2025.shp")
 
-# GENERO I BUFFER REALI -----------------------------------------
 buf_2013 <- buffer(seg_2013_v, width = 50)
 buf_2025 <- buffer(seg_2025_v, width = 50)
 
 
-# ANNO 2013: ESTRAZIONE STANDARD ------------------------------------
+# --- ANNO 2013 -----------------------
 buf_2013_proj <- project(buf_2013, crs(ndvi_2013_veg))
-ext_2013      <- terra::extract(ndvi_2013_veg, buf_2013_proj, fun = mean, na.rm = TRUE)
+
+ext_2013       <- terra::extract(ndvi_2013_veg, buf_2013_proj, fun = mean, na.rm = TRUE, exact = TRUE)
+ext_2013_greg  <- terra::extract(ndvi_2013, buf_2013_proj, fun = mean, na.rm = TRUE, exact = TRUE)
+
+# Recupero se la maschera dell'acqua ha rimosso troppi pixel
+valori_2013_ok <- ifelse(is.na(ext_2013[, 2]), ext_2013_greg[, 2], ext_2013[, 2])
 
 ndvi_2013_df  <- data.frame(
   ID_SEGM = buf_2013$ID_SEGM,
-  NDVI    = ext_2013[, 2],
+  NDVI    = valori_2013_ok,
   ANNO    = 2013
 )
 
 
-# ANNO 2025: SPLIT TRA TRATTI STANDARD E TRATTO TAGLI ---------------
-# Uso i filtri testuali sull'ID_SEGM o sul nome del tratto per separarli.
+# --- ANNO 2025: SEPARAZIONE DEI BUFFER ED ESTRAZIONE MIRATA ------------
+# Separo spazialmente i poligoni prima di estrarre
+buf_2025_tagli    <- buf_2025[grepl("T3", buf_2025$ID_SEGM), ]  # prende i valori con "T3" nell'id, riferiti al tratto "Tagli"
+buf_2025_standard <- buf_2025[!grepl("T3", buf_2025$ID_SEGM), ]  #prende i valori senza "T3", riferiti agli altri due tratti
 
-# Separazione dei buffer 2025
-buf_2025_tagli    <- buf_2025[grepl("T3", buf_2025$ID_SEGM), ]  # Filtra i segmenti con la 'T3' di Tagli
-buf_2025_standard <- buf_2025[!grepl("T3", buf_2025$ID_SEGM), ] # Tutti gli altri (Valle, Monte)
-
-
-# Estrazione per Tratti Standard 2025 (Valle e Monte)
+# Estrazione per i Tratti Standard (Valle e Monte)
 buf_2025_std_proj <- project(buf_2025_standard, crs(ndvi_2025_veg))
-ext_2025_std      <- terra::extract(ndvi_2025_veg, buf_2025_std_proj, fun = mean, na.rm = TRUE)
+ext_2025_std      <- terra::extract(ndvi_2025_veg, buf_2025_std_proj, fun = mean, na.rm = TRUE, exact = TRUE)
 
-ndvi_2025_std_df  <- data.frame(
+df_2025_standard_finale <- data.frame(
   ID_SEGM = buf_2025_standard$ID_SEGM,
   NDVI    = ext_2025_std[, 2],
   ANNO    = 2025
 )
 
-# Estrazione per Tratto Tagli 2025 
+# Estrazione per il Tratto Tagli (T3) 
 buf_2025_tag_proj <- project(buf_2025_tagli, crs(ndvi_T2025_veg))
-ext_2025_tag      <- terra::extract(ndvi_T2025_veg, buf_2025_tag_proj, fun = mean, na.rm = TRUE)
+ext_2025_tag      <- terra::extract(ndvi_T2025_veg, buf_2025_tag_proj, fun = mean, na.rm = TRUE, exact = TRUE)
+ext_2025_tag_greg <- terra::extract(ndvi_T2025_30m, buf_2025_tag_proj, fun = mean, na.rm = TRUE, exact = TRUE)
 
-ndvi_2025_tag_df  <- data.frame(
+valori_tagli_ok   <- ifelse(is.na(ext_2025_tag[, 2]), ext_2025_tag_greg[, 2], ext_2025_tag[, 2])
+
+df_2025_tagli_finale <- data.frame(
   ID_SEGM = buf_2025_tagli$ID_SEGM,
-  NDVI    = ext_2025_tag[, 2],
+  NDVI    = valori_tagli_ok,
   ANNO    = 2025
 )
 
+# Riunione dei due blocchi del 2025
+ndvi_2025_df_pulito <- bind_rows(df_2025_standard_finale, df_2025_tagli_finale)
 
-# UNIONE COMPLETA DEI TRE DATASET -----------------------------------
-ndvi_totale_lineare <- bind_rows(ndvi_2013_df, ndvi_2025_std_df, ndvi_2025_tag_df) %>% 
+
+ndvi_totale_lineare <- bind_rows(ndvi_2013_df, ndvi_2025_df_pulito) %>% 
   mutate(ID_SEGM = str_trim(ID_SEGM))
 
-# Salvataggio del file finale pulito
+# Controllo diagnostico finale obbligatorio
+# verifico che non ci siano valori NA (Problema per il tratto tagli)
+totale_na <- sum(is.na(ndvi_totale_lineare$NDVI))
+print(paste("--> DIAGNOSTICA: Numero finale di segmenti rimasti con NA:", totale_na))
+
+# Esporto in formato CSV 
 write.csv2(ndvi_totale_lineare, "NDVI_Finali_Segmenti_Tesi.csv", row.names = FALSE)
+print("--> SUCCESS: Tabella finale esportata in 'NDVI_Finali_Segmenti_Tesi.csv'!")
+
+
