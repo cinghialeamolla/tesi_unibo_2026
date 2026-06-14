@@ -376,6 +376,11 @@ anova_S
 
   print("--- RISULTATI ANCOVA SHANNON (H') CON NDVI ---")
   print(summary(anova_H))
+ # OUTPUT
+ #              Df   Sum Sq   Mean Sq   F value   Pr(>F)
+ # NOME_TRATTO  2    0.155   0.07737     1.096    0.340
+ # NDVI         1    0.000   0.00005     0.001    0.978
+ # Residuals   74    5.224   0.07059  
   
   # Ho provato il test post - hoc
   print("--- TEST POST-HOC CON EMMEANS SHANNON (H) ---")
@@ -384,66 +389,71 @@ anova_S
   print(confronti_H)
 
 # OUTPUT
- # contrast       estimate     SE df t.ratio p.value
- # Monte - Tagli  0.093882 0.0847 74   1.109  0.5117
- # Monte - Valle  0.000963 0.1010 74   0.010  0.9999
- # Tagli - Valle -0.092919 0.1310 74  -0.709  0.7589
+# contrast         estimate     SE     df   t.ratio    p.value
+# Monte - Tagli    0.093882   0.0847   74    1.109      0.5117
+# Monte - Valle    0.000963   0.1010   74    0.010      0.9999
+# Tagli - Valle   -0.092919   0.1310   74   -0.709      0.7589
 
 # =====================================================================
-# GENERAZIONE TABELLA ESPLICATIVA INDICE DI SHANNON (H') IN WORD
+# GENERAZIONE TABELLA ESPLICATIVA 
 # =====================================================================
-library(emmeans)
+library(car)
 library(flextable)
 library(officer)
 library(dplyr)
 
-# EstraGGo le medie stimate dal modello ANCOVA (non trasformato)
-# emmeans calcola le medie fissando la covariata NDVI sul suo valore medio globale
-shannon_medie <- as.data.frame(emmeans(anova_H, ~ NOME_TRATTO))
+# Trasforo l'output dell'ANCOVA in un dataframe pulito
+# Usiamo Anova (Tipo II) del pacchetto car, ideale in presenza di covariate
+tabella_ancova_dati <- as.data.frame(car::Anova(anova_H, type = "II"))
 
-#  Preparo i dati per la tabella 
-tabella_shannon_dati <- shannon_medie %>%
-  transmute(
-    Tratto = NOME_TRATTO,
-    N_Segmenti = as.integer(c(25, 25, 28)), # Numero reale di segmenti per tratto
-    H_Stimato = emmean,
-    Errore_Std = SE,
-    IC_Inferiore = lower.CL,
-    IC_Superiore = upper.CL
+# Aggiungo i nomi delle sorgenti di variazione come colonna esplicita
+tabella_ancova_dati <- tabella_ancova_dati %>%
+  rownames_to_column(var = "Sorgente_Variazione") %>%
+  mutate(
+    Sorgente_Variazione = case_when(
+      Sorgente_Variazione == "NOME_TRATTO" ~ "Tratto di Fiume (Fattore)",
+      Sorgente_Variazione == "NDVI"        ~ "NDVI (Covariata)",
+      Sorgente_Variazione == "Residuals"   ~ "Residui",
+      TRUE ~ Sorgente_Variazione
+    )
   )
 
-# Creo la struttura della tabella con flextable
-tabella_word_shannon <- flextable(tabella_shannon_dati) %>%
+# Creo la tabella con flextable impostando i parametri anti-warning
+tabella_word_ancova <- flextable(tabella_ancova_dati) %>%
   set_header_labels(
-    Tratto       = "Tratto di Fiume",
-    N_Segmenti   = "N° Segmenti",
-    H_Stimato    = "Indice H' Stimato*",
-    Errore_Std   = "Err. Std. (SE)",
-    IC_Inferiore = "Inf. (95% IC)",
-    IC_Superiore = "Sup. (95% IC)"
+    Sorgente_Variazione = "Sorgente di Variazione",
+    `Sum Sq`            = "Somma dei Quadrati (SS)",
+    Df                  = "g.l.",
+    `F value`           = "Valore F",
+    `Pr(>F)`            = "p-value"
   ) %>%
-  # Formatto i decimali con la virgola (standard italiano)
-  colformat_double(j = c("H_Stimato", "Errore_Std", "IC_Inferiore", "IC_Superiore"), 
-                   digits = 3, decimal.mark = ",", big.mark = "") %>%
-  colformat_int(j = "N_Segmenti", big.mark = "") %>%
+  # big.mark = "" elimina i conflitti con la virgola decimale nei sistemi italiani
+  colformat_double(j = c("Sum Sq", "F value"), digits = 3, decimal.mark = ",", big.mark = "") %>%
+  colformat_double(j = "Pr(>F)", digits = 4, decimal.mark = ",", na_str = "") %>%
+  colformat_int(j = "Df", big.mark = "") %>%
   theme_booktabs() %>%
   autofit() %>%
   bold(part = "header") %>%
   flextable::align(align = "center", part = "all") %>%
-  flextable::align(j = "Tratto", align = "left", part = "all") %>%
-  # Aggiungo una nota metodologica a piè di pagina per i revisori
-  add_footer_lines("*Medie marginali stimate dal modello ANCOVA calcolate impostando la covariata NDVI al suo valore medio globale (NDVI = 0,503).") %>%
+  flextable::align(j = "Sorgente_Variazione", align = "left", part = "all") %>%
   font(fontname = "Times New Roman", part = "all") %>%
   fontsize(size = 11, part = "all")
 
-# Inizializzo ed esporto il file Word dedicato
-doc_shannon <- read_docx()
-doc_shannon <- body_add_par(doc_shannon, "Tabella 7 - Medie stimate dal modello ANCOVA per l'Indice di Shannon (H') della comunità ornitica (Anno 2025).", style = "heading 2")
-doc_shannon <- body_add_flextable(doc_shannon, value = tabella_word_shannon)
+# Creo ed eporto il file Word dedicato
+doc_ancova <- read_docx()
 
-# Salvo il file
-print(doc_shannon, target = "C:/RTesi/tabella_modello_shannon_2025.docx")
-print("--- TABELLA SHANNON ESPORTATA CON SUCCESSO IN WORD! ---")
+doc_ancova <- body_add_par(
+  doc_ancova, 
+  "Tabella 7.1 - Risultati del modello di Analisi della Covarianza (ANCOVA Tipo II) per l'Indice di Shannon (H') (Anno 2025).", 
+  style = "heading 2"
+)
+
+doc_ancova <- body_add_flextable(doc_ancova, value = tabella_word_ancova)
+
+# Salvo del file nella cartella della tesi
+print(doc_ancova, target = "C:/RTesi/tabella_risultati_ancova_shannon_2025.docx")
+
+print("--- FILE WORD ANCOVA GENERATO CON SUCCESSO IN C:/RTesi/tabella_risultati_ancova_shannon_2025.docx ---")
 
 
   # ==============================================================================
@@ -453,7 +463,7 @@ print("--- TABELLA SHANNON ESPORTATA CON SUCCESSO IN WORD! ---")
   print("--- RISULTATI ANCOVA EVEnNESS (J') CON NDVI ---")
   print(summary(anova_J))
   
-  shapiro.test(residuals(anova_J)) # p-value = 1.429e-09, è MOLTO inferiore a 0,05, i residui non sono normali, suppongo
+  shapiro.test(residuals(anova_J)) # p-value =  1.317e-09, è MOLTO inferiore a 0,05, i residui non sono normali
   
   levene_J <- leveneTest(Evenness_J ~ NOME_TRATTO, data = dataset_analisi_1)
   print(levene_J) #p-value = 0.2678 > p-vaue 0,05; quindi le varianze dovrebbero essere omogenee
@@ -714,8 +724,7 @@ print("--- TABELLA 1 WORD GENERATA CON SUCCESSO ---")
   }
   summary(modello_beta_j)
   
-  # TRATTOValle: p-value = 0.0594. Si trova appena sopra la soglia
-  # Tutti gli altri p-value sono sopra
+  # Tutti i p-value sono sopra la soglia
   
 ### ================================================================================================
 ### ---- TEST POST-HOC PER IL GLM (Confronti a coppie tra Tratti) -----
@@ -1055,8 +1064,6 @@ print("Grafico a barre classico salvato correttamente!")
 #  GLM QUASIPOISSON PER GLI SPECIALISTI FORESTALI
 # =====================================================================
 
-
-
 library(tidyverse)
 library(car)
 library(emmeans)
@@ -1064,47 +1071,62 @@ library(broom)
 library(flextable)
 library(officer)
 library(stringr)
-  
-# Calcolo la matrice comunità filtrando solo le specie "riparian - forestry  nesters", quelle che nidificano nella vegetazione arborea
-specie_forestali<- specie %>%
-    filter(ID_SEGMENTO %in% seg_2025$ID_SEGMENTO, GUILD == "riparian - forestry  nesters") %>% # Verifica come è scritto nel foglio
-     group_by(ID_SEGMENTO, SPECIE) %>%
-     summarise(CONTEGGIO_TOT = sum(CONTEGGIO), .groups = "drop")
-  
-matrice_specialisti <- specie_forestali %>%
-     pivot_wider(names_from = SPECIE, values_from = CONTEGGIO_TOT, values_fill = 0) %>%
-     column_to_rownames("ID_SEGMENTO")
-   
-# Calcolo la ricchezza degli specialisti
-   indici_specialisti <- tibble(
-     ID_SEGMENTO = rownames(matrice_specialisti),
-     S_Specialisti = vegan::specnumber(matrice_specialisti)
-   )
 
+
+# Calcolo la matrice comunità filtrando solo le specie "riparian - forestry  nesters", quelle che nidificano nella vegetazione arborea
+specie_forestali <- specie %>%
+  # str_squish rimuove i doppi spazi accidentali presenti nel testo della colonna GUILD
+  filter(ID_SEGMENTO %in% seg_2025$ID_SEGMENTO, 
+         str_squish(GUILD) == "riparian - forestry nesters") %>% 
+  group_by(ID_SEGMENTO, SPECIE) %>%
+  summarise(CONTEGGIO_TOT = sum(CONTEGGIO), .groups = "drop")
+
+# Trasformazione in formato WIDE
+matrice_specialisti <- specie_forestali %>%
+  pivot_wider(names_from = SPECIE, values_from = CONTEGGIO_TOT, values_fill = 0) %>%
+  column_to_rownames("ID_SEGMENTO")
+
+# Calcolo della ricchezza degli specialisti forestali
+indici_specialisti <- tibble(
+  ID_SEGMENTO = rownames(matrice_specialisti),
+  S_Specialisti = vegan::specnumber(matrice_specialisti)
+)
+
+# Unisco i segmenti del 2025 con la ricchezza della gilda forestale
+dataset_specialisti <- seg_2025_corretto %>%
+  left_join(indici_specialisti, by = "ID_SEGMENTO") %>%
+  # Se in un segmento non è stato visto alcuno specialista, la ricchezza deve essere 0 e non NA
+  mutate(S_Specialisti = replace_na(S_Specialisti, 0))
+
+# 5. ESECUZIONE DEL MODELLO GLM QUASIPOISSON
 glm_specialisti <- glm(S_Specialisti ~ NOME_TRATTO + NDVI, 
                        family = quasipoisson(link = "log"), 
                        data = dataset_specialisti)
+
 
 # Test globale di Tipo III
 print("--- ANOVA TIPO III SPECIALISTI ---")
 Anova(glm_specialisti, type = "III")
 
 # OUTPUT
-#            LR Chisq Df Pr(>Chisq)   
-# NOME_TRATTO  10.3044  2   0.005787 **
-# NDVI          0.8362  1   0.360482   
-# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+#            LR   Chisq     Df     Pr(>Chisq)   
+#  NOME_TRATTO     16.516    2    0.0002592 ***
+#  NDVI             0.005    1    0.9433773  
+# Signif. codes:    0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 
 # Medie stimate e Post-Hoc di Tukey (scala reale)
 medie_gls_spec <- emmeans(glm_specialisti, ~ NOME_TRATTO, type = "response")
 confronti_spec <- pairs(medie_gls_spec, adjust = "tukey")
 print(confronti_spec)
 
+
 # OUTPUT
- # contrast      ratio     SE  df null z.ratio p.value
- # Monte / Tagli  1.21 0.0830 Inf    1   2.827  0.0130
- # Monte / Valle  1.26 0.1140 Inf    1   2.577  0.0269
- # Tagli / Valle  1.04 0.0909 Inf    1   0.446  0.8960
+# contrast         ratio      SE    df   null   z.ratio   p.value
+ # Monte / Tagli   1.22    0.0951   Inf    1     2.554    0.0287
+ # Monte / Valle   1.34    0.1280   Inf    1     3.065    0.0062
+ # Tagli / Valle   1.10    0.1390   Inf    1     0.737    0.7413
+
+
 
 
 
