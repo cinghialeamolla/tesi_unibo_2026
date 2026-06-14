@@ -132,6 +132,8 @@ print("--> SUCCESS: Tabella finale esportata in 'NDVI_Finali_Segmenti.csv'!")
 #  install.packages("GGally")
 #  install.packages("flextable")
 
+
+
 {
   library(readxl)
   library(vegan) # per il calcolo degli indici ecologici
@@ -276,7 +278,7 @@ confronti_posthoc <- emmeans(gls_ndvi, pairwise ~ NOME_TRATTO, adjust = "tukey")
 print(confronti_posthoc$contrasts)
 
 # OUTPUT p.value
-# Monte - Tagli   p.value <0.0001 > 0.05
+# Monte - Tagli   p.value <0.0001 < 0.05
 # Monte - Valle   p.value <0.0001 < 0.05
 # Tagli - Valle   p.value <0.0001 < 0.05
 
