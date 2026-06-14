@@ -350,9 +350,10 @@ anova_S
 
 
 #   OUTPUT:         NOME_TRATTO     NDVI Residuals
-#  Sum of Squares      17.0260   4.9277  539.4308
+#  Sum of Squares      17.0260   0.9089  543.4497
+
 # Deg. of Freedom           2        1        74
-# Residual standard error: 2.699927
+# Residual standard error: 2.709966
 # Estimated effects may be unbalanced
 
 # l'ANOVA non sembra significativa
@@ -361,22 +362,93 @@ anova_S
 
 ## HO RIPETUTO PER GLI ALTRI INDICI DI DIVERSITA'
 
+# ==============================================================================
 # ANOVA sull'Indice di Shannon includendo l'NDVI come covariata (ANCOVA)
+# ==============================================================================
 
   anova_H <- aov(Shannon_H ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
   anova_H
   
-  shapiro.test(residuals(anova_H)) # p-value = 0.04702, è INFERIORE a 0,05, residui NON sono normali
+  shapiro.test(residuals(anova_H)) # p-value = 0.0963, è superiore a 0,05, i residui sono normali
   
   levene_H <- leveneTest(Shannon_H ~ NOME_TRATTO, data = dataset_analisi_1)
   print(levene_H) # p-value=  0.3517 > p-vaue 0,05; le varianze dovrebbero essere omogenee
+
+  print("--- RISULTATI ANCOVA SHANNON (H') CON NDVI ---")
+  print(summary(anova_H))
   
-   #  Devo comunque cambiare approccio anche qui
+  # Ho provato il test post - hoc
+  print("--- TEST POST-HOC CON EMMEANS SHANNON (H) ---")
+  H_medie_em <- emmeans(anova_H, ~ NOME_TRATTO)
+  confronti_H <- pairs(H_medie_em, adjust = "tukey")
+  print(confronti_H)
+
+# OUTPUT
+ # contrast       estimate     SE df t.ratio p.value
+ # Monte - Tagli  0.093882 0.0847 74   1.109  0.5117
+ # Monte - Valle  0.000963 0.1010 74   0.010  0.9999
+ # Tagli - Valle -0.092919 0.1310 74  -0.709  0.7589
+
+# =====================================================================
+# GENERAZIONE TABELLA ESPLICATIVA INDICE DI SHANNON (H') IN WORD
+# =====================================================================
+library(emmeans)
+library(flextable)
+library(officer)
+library(dplyr)
+
+# EstraGGo le medie stimate dal modello ANCOVA (non trasformato)
+# emmeans calcola le medie fissando la covariata NDVI sul suo valore medio globale
+shannon_medie <- as.data.frame(emmeans(anova_H, ~ NOME_TRATTO))
+
+#  Preparo i dati per la tabella 
+tabella_shannon_dati <- shannon_medie %>%
+  transmute(
+    Tratto = NOME_TRATTO,
+    N_Segmenti = as.integer(c(25, 25, 28)), # Numero reale di segmenti per tratto
+    H_Stimato = emmean,
+    Errore_Std = SE,
+    IC_Inferiore = lower.CL,
+    IC_Superiore = upper.CL
+  )
+
+# Creo la struttura della tabella con flextable
+tabella_word_shannon <- flextable(tabella_shannon_dati) %>%
+  set_header_labels(
+    Tratto       = "Tratto di Fiume",
+    N_Segmenti   = "N° Segmenti",
+    H_Stimato    = "Indice H' Stimato*",
+    Errore_Std   = "Err. Std. (SE)",
+    IC_Inferiore = "Inf. (95% IC)",
+    IC_Superiore = "Sup. (95% IC)"
+  ) %>%
+  # Formatto i decimali con la virgola (standard italiano)
+  colformat_double(j = c("H_Stimato", "Errore_Std", "IC_Inferiore", "IC_Superiore"), 
+                   digits = 3, decimal.mark = ",", big.mark = "") %>%
+  colformat_int(j = "N_Segmenti", big.mark = "") %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  bold(part = "header") %>%
+  flextable::align(align = "center", part = "all") %>%
+  flextable::align(j = "Tratto", align = "left", part = "all") %>%
+  # Aggiungo una nota metodologica a piè di pagina per i revisori
+  add_footer_lines("*Medie marginali stimate dal modello ANCOVA calcolate impostando la covariata NDVI al suo valore medio globale (NDVI = 0,503).") %>%
+  font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 11, part = "all")
+
+# Inizializzo ed esporto il file Word dedicato
+doc_shannon <- read_docx()
+doc_shannon <- body_add_par(doc_shannon, "Tabella 7 - Medie stimate dal modello ANCOVA per l'Indice di Shannon (H') della comunità ornitica (Anno 2025).", style = "heading 2")
+doc_shannon <- body_add_flextable(doc_shannon, value = tabella_word_shannon)
+
+# Salvo il file
+print(doc_shannon, target = "C:/RTesi/tabella_modello_shannon_2025.docx")
+print("--- TABELLA SHANNON ESPORTATA CON SUCCESSO IN WORD! ---")
 
 
-
+  # ==============================================================================
   # ANOVA sull'Indice di EveNness includendo l'NDVI come covariata (ANCOVA)
-  
+  # ==============================================================================
   anova_J <- aov(Evenness_J ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
   print("--- RISULTATI ANCOVA EVEnNESS (J') CON NDVI ---")
   print(summary(anova_J))
@@ -432,7 +504,7 @@ anova_S
   # Se è decisamente > 1.3, c'è sovradispersione!
   # Se è inferiore a 0.7, c'è sottodispersione (raro)
   
-  # OUTPUT - Ratio di dispersione: 0.6354929  
+  # OUTPUT - Ratio di dispersione: 0.6476735  
   # Direi che siamo nel secondo caso
   
 ### ================================================================================================
@@ -612,63 +684,10 @@ print("--- TABELLA 1 WORD GENERATA CON SUCCESSO ---")
 }
 
 
- # Monte - Tagli    p-value  0.6360
- # Monte - Valle    p-value  0.6803
- # Tagli - Valle    p-value  0.2283
+ # Monte - Tagli    p-value   0.6097
+ # Monte - Valle    p-value  0.9961
+ # Tagli - Valle    p-value  0.7760
 #  p-value sempre > 0,05
-
-
-
-# =====================================================================
-# PREPARAZIONE DATI PER LA TABELLA 2 (SHANNON)
-# =====================================================================
-
-dati_H <- tidy(lm_shannon) %>%
-  mutate(term = case_when(
-    term == "(Intercept)" ~ "Intercetta (Monte)",
-    term == "NOME_TRATTOTagli" ~ "Tratto: Tagli",
-    term == "NOME_TRATTOValle" ~ "Tratto: Valle",
-    term == "NDVI" ~ "NDVI (Covariata)",
-    TRUE ~ term
-  )) %>%
-  # Aggiungoo la colonna per la significatività
-  mutate(
-    Signif = case_when(
-      p.value < 0.001 ~ "***",
-      p.value < 0.01  ~ "**",
-      p.value < 0.05  ~ "*",
-      TRUE            ~ "NS"
-    ),
-    # Arrotondo il p-value
-    p.value = if_else(p.value < 0.001, "< 0,001", as.character(round(p.value, 4)))
-  ) %>%
-  # Seleziono le colonne
-  select(term, estimate, std.error, statistic, p.value, Signif)
-
-
-ft_H <- flextable(dati_H) %>%
-  set_header_labels(
-    term      = "Variabile / Predittore",
-    estimate  = "Stima (β)",
-    std.error = "Errore Standard (SE)",
-    statistic = "Valore t",
-    p.value   = "p-value",
-    Signif    = "Signif."
-  ) %>%
-  colformat_double(j = c("estimate", "std.error", "statistic"), digits = 3, decimal.mark = ",", big.mark = "") %>%
-  theme_booktabs() %>%                
-  autofit() %>%                       
-  bold(part = "header") %>%           
-  flextable::align(align = "center", part = "all") %>% 
-  flextable::align(j = "term", align = "left", part = "all")
-
-# Salvo il documento Word dedicato
-doc_H <- read_docx()
-doc_H <- body_add_par(doc_H, "Tabella 2: Risultati del Modello Lineare Gaussiano sull'Indice di diversità di Shannon (H') previa trasformazione di Box-Cox (Anno 2025).", style = "Normal")
-doc_H <- body_add_flextable(doc_H, value = ft_H)
-
-print(doc_H, target = "C:/RTesi/tabella_2_shannon_H_2025.docx")
-print("--- TABELLA 2 SHANNON WORD GENERATA CON SUCCESSO ---")
 
 
 
