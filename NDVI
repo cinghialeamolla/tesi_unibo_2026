@@ -1,120 +1,13 @@
-setwd("C:/RTesi")  # Carico la cartella
-library(terra)
 
-# =====================================================================
-# GENERAZIONE DEI RASTER NDVI
-# =====================================================================
-
-# --- LANDSAT 8 (2013) - Risoluzione: ~30m (userò questa come riferimento)
-b4_2013 <- rast("16_giugno_2013_LC08_B4.TIF") 
-b5_2013 <- rast("16_giugno_2013_LC08_B5.TIF") 
-ndvi_2013 <- (b5_2013 - b4_2013) / (b5_2013 + b4_2013)
-writeRaster(ndvi_2013, "ndvi_ombrone_2013.tif", overwrite=TRUE)
-
-# --- SENTINEL-2 (2025) - Risoluzione: 10m
-b4_2025 <- rast("24_maggio_2025_Sentinel-2_L2A_B04_(Raw).tiff") 
-b8_2025 <- rast("24_maggio_2025_Sentinel-2_L2A_B08_(Raw).tiff") 
-ndvi_2025_10m <- (b8_2025 - b4_2025) / (b8_2025 + b4_2025)
-
-# --- SENTINEL-2 (2025 Tagli)
-b4_T2025 <- rast("Tagli_2025_Sentinel-2_L2A_B04_(Raw).tiff") 
-b8_T2025 <- rast("Tagli_2025_Sentinel-2_L2A_B08_(Raw).tiff") 
-
-# Provo a risolvere l'errore geometrico tra B4 e B8 prima di fare l'NDVI
-b4_T2025_allineata <- resample(b4_T2025, b8_T2025, method = "bilinear")
-
-# Calcolo NDVI a 10m 
-ndvi_T2025_10m <- (b8_T2025 - b4_T2025_allineata) / (b8_T2025 + b4_T2025_allineata)
-
-
-# =====================================================================
-# RIPROIEZIONE E DEGRADAZIONE DEL 2025 SULLA GRIGLIA 2013 (30m)
-# =====================================================================
-# Uso project() per allineare CRS e risoluzione senza perdere dati
-ndvi_2025_resampled  <- project(ndvi_2025_10m, ndvi_2013, method = "bilinear")
-
-# Salvo i raster standardizzati a 30m
-writeRaster(ndvi_2025_resampled, "ndvi_ombrone_2025_30m.tif", overwrite=TRUE)
-
-
-
-# =====================================================================
-# MASCHERAMENTO ACQUA ED ESTRAZIONE BUFFER (Tratti Principali)
-# =====================================================================
-# Carico i punti
-dati_punti <- read.csv("punti.csv", sep = ";", dec = ",")
-punti_geo  <- vect(dati_punti, geom = c("est", "nord"), crs = "EPSG:32632")
-
-# Elimino l'acqua (NDVI <= 0.1 diventa NA)
-ndvi_2013_veg <- ifel(ndvi_2013 <= 0.1, NA, ndvi_2013)
-ndvi_2025_veg <- ifel(ndvi_2025_resampled <= 0.1, NA, ndvi_2025_resampled)
-
-# Allineo i punti al CRS esatto del raster per evitare slittamenti
-punti_proiettati <- project(punti_geo, crs(ndvi_2013_veg))
-punti_buffer     <- buffer(punti_proiettati, width = 100)
-
-# Estrazione della media
-ext_2013 <- terra::extract(ndvi_2013_veg, punti_buffer, fun = mean, na.rm = TRUE)
-ext_2025 <- terra::extract(ndvi_2025_veg, punti_buffer, fun = mean, na.rm = TRUE)
-
-# Costruisco il dataframe
-risultato_intorno <- dati_punti
-risultato_intorno$NDVI_Buffer_2013  <- ext_2013[, 2] 
-risultato_intorno$NDVI_Buffer_2025  <- ext_2025[, 2]
-risultato_intorno$Delta_NDVI_Buffer <- risultato_intorno$NDVI_Buffer_2025 - risultato_intorno$NDVI_Buffer_2013
-
-write.csv2(risultato_intorno, "valori_ndvi_buffer_100m.csv", row.names = FALSE)
-
-
-# =====================================================================
-# MASCHERAMENTO ACQUA ED ESTRAZIONE BUFFER (Tratti Tagliati 2025)
-# =====================================================================
-# Carico i punti dei tagli
-dati_Tpunti <- read.csv("puntiT.csv", sep = ";", dec = ",")
-punti_Tgeo  <- vect(dati_Tpunti, geom = c("est", "nord"), crs = "EPSG:32632")
-
-# Essendoci solo un'immagine per il 2025, non posso usare ndvi_2013, ma devo creare una griglia a 30m 
-# basata sull'estensione ESATTA e NATIVA del raster dei tagli stesso
-# Ho avuto anche un altro errore geometrico sul sistema di riferimento
-# Quindi ho creato una griglia definita esplicitamente in metri UTM 32N
-# Poi ho preso l'estensione del raster dei tagli forzando il CRS metrico corretto
-griglia_utmM_tagli <- rast(
-  crs  = "EPSG:32632",
-  ext  = ext(project(ndvi_T2025_10m, "EPSG:32632")), # Calcola l'estensione reale in metri
-  resolution = c(30, 30)                            # Risoluzione corretta a 30 metri
-)
-
-# Ho riproiettato l'NDVI sulla nuova griglia metrica standardizzata a 30m (per evitare Na in output)
-ndvi_T2025_resampled <- project(ndvi_T2025_10m, griglia_utmM_tagli, method = "bilinear")
-
-# Elimino l'acqua (NDVI <= 0.1 diventa NA)
-ndvi_T2025_veg <- ifel(ndvi_T2025_resampled <= 0.1, NA, ndvi_T2025_resampled)
-
-# Allineo i punti al CRS esatto del raster
-punti_Tproiettati <- project(punti_Tgeo, crs(ndvi_T2025_veg))
-
-# Genero i buffer da 100 metri
-punti_Tbuffer     <- buffer(punti_Tproiettati, width = 100)
-
-# Estraggo i valori medi (na.rm = TRUE esclude i pixel d'acqua mascherati)
-ext_T2025 <- terra::extract(ndvi_T2025_veg, punti_Tbuffer, fun = mean, na.rm = TRUE)
-
-# Salvo nel dataframe
-risultato_Tintorno <- dati_Tpunti
-risultato_Tintorno$NDVI_Buffer_2025 <- ext_T2025[, 2]
-
-# Salvo il file CSV finale
-write.csv2(risultato_Tintorno, "valori_ndvi_tagli_buffer_100m.csv", row.names = FALSE)
-
-
-
-
-
-
-##### METODO CORRETTO FINALE
 # =====================================================================
 # ESTRAZIONE NDVI SU BUFFER DEI SEGMENTI REALI
 # =====================================================================
+
+library(terra)
+library(tidyverse)
+
+setwd("C:/RTesi")
+
 
 # --- LANDSAT 8 (2013) - Pixel 30m 
 b4_2013 <- rast("16_giugno_2013_LC08_B4.TIF") 
@@ -218,6 +111,6 @@ print(paste("--> DIAGNOSTICA: Numero finale di segmenti rimasti con NA:", totale
 
 # Esporto in formato CSV 
 write.csv2(ndvi_totale_lineare, "NDVI_Finali_Segmenti_Tesi.csv", row.names = FALSE)
-print("--> SUCCESS: Tabella finale esportata in 'NDVI_Finali_Segmenti_Tesi.csv'!")
+print("--> SUCCESS: Tabella finale esportata in 'NDVI_Finali_Segmenti.csv'!")
 
 
