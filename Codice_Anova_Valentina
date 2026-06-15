@@ -1,6 +1,6 @@
-# =====================================================================
-# ---- ANALISI INDICI DIVERSITA': 2025 ----
-# =====================================================================
+  # =====================================================================
+  # ---- ANALISI INDICI DIVERSITA': 2025 ----
+  # =====================================================================
 
 # ANOVA / Kruskal-Wallis (Indici di Diversità 2025):
 # In R, partendo dal foglio Contatti_Specie filtrato sul 2025, si calcoleranno gli indici
@@ -41,6 +41,7 @@
   library(Hmisc)
   library(broom)
   library(stringr)
+  library(pairwiseAdonis)  # Per la Permanova
 }
 
 # Ho dovuto risolvere un probema di conflitto tra pacchetti istallati sul mio R
@@ -68,14 +69,14 @@ setwd("C:/RTesi")
   # Filtriamo i segmenti del 2025
   seg_2025 <- segmenti %>%
     filter(ANNO == 2025)
-
+  
   # Filtriamo i contatti del 2025 e aggreghiamo per segmento (sommando le sponde)
   # per avere il dato totale del segmento da confrontare tra i tre tratti
   specie_2025 <- specie %>%
     filter(ID_SEGMENTO %in% seg_2025$ID_SEGMENTO) %>%
     group_by(ID_SEGMENTO, SPECIE) %>%
     summarise(CONTEGGIO_TOT = sum(CONTEGGIO), .groups = "drop")
-
+  
   # Trasformiamo in formato WIDE (Siti x Specie) per il pacchetto vegan
   matrice_comunita <- specie_2025 %>%
     pivot_wider(
@@ -85,6 +86,11 @@ setwd("C:/RTesi")
     ) %>%
     column_to_rownames("ID_SEGMENTO")
 }
+
+# Trasformo la colonna NDVI da "carattere" a "numerica" prima del calcolo
+seg_2025_corretto <- seg_2025 %>%
+  mutate(NDVI = as.numeric(as.character(NDVI)))
+# se non lo faccio mi genera degli errori più avanti
 
 
 ## =====================================================================
@@ -131,7 +137,7 @@ dataset_analisi_1 <- seg_2025 %>%
       `Shannon (H')`,
       `Evenness (J')`
     )
-}
+  }
 print("--- TABELLA RIASSUNTIVA INDICI PER TRANSETTO (2025) ---")
 print(tabella_riassuntiva_formattata)
 
@@ -223,9 +229,9 @@ anova_S
 
 # verifica degli assunti dell'ANOVA: importante, da fare prima di guardare i risultati!
 # perché se gli assunti non sono rispettati dobbiamo passare al blocco di analisi successivo
-  shapiro.test(residuals(anova_S)) # p-value = 0.3433 > 0,05 -> i residui sono normali
-  levene_S <- leveneTest(Ricchezza_S ~ NOME_TRATTO, data = dataset_analisi_1)
-  print(levene_S) # p-value = 0.9138 > 0,05-> le varianze sono omogenee
+shapiro.test(residuals(anova_S)) # p-value = 0.3433 > 0,05 -> i residui sono normali
+levene_S <- leveneTest(Ricchezza_S ~ NOME_TRATTO, data = dataset_analisi_1)
+print(levene_S) # p-value = 0.9138 > 0,05-> le varianze sono omogenee
 
 # Ma l'ANOVA non è significativa,
 
@@ -236,16 +242,15 @@ anova_S
 # ANOVA sull'Indice di Shannon includendo l'NDVI come covariata (ANCOVA)
 # ==============================================================================
 
- 
-  # Imposta i contrasti ortogonali (obbligatori per il Tipo III)
-  options(contrasts = c("contr.sum", "contr.poly"))
+# Imposto i contrasti ortogonali (obbligatori per il Tipo III)
+options(contrasts = c("contr.sum", "contr.poly"))
 
-   modello_H_lineare <- lm(Shannon_H ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
-  
-  shapiro.test(residuals(anova_H)) # p-value = 0.0963, è superiore a 0,05, i residui sono normali
-  
-  levene_H <- leveneTest(Shannon_H ~ NOME_TRATTO, data = dataset_analisi_1)
-  print(levene_H) # p-value=  0.3517 > p-vaue 0,05; le varianze sono omogenee
+modello_H_lineare <- lm(Shannon_H ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
+
+shapiro.test(residuals(modello_H_lineare)) # p-value = 0.0963, è superiore a 0,05, i residui sono normali
+
+levene_H <- leveneTest(Shannon_H ~ NOME_TRATTO, data = dataset_analisi_1)
+print(levene_H) # p-value=  0.3517 > p-vaue 0,05; le varianze sono omogenee
 
 # Calcolo la tabella ANCOVA di Tipo III
 print("--- RISULTATI ANCOVA SHANNON (TIPO III) ---")
@@ -255,7 +260,7 @@ Anova(modello_H_lineare, type = "III")
 options(contrasts = c("contr.treatment", "contr.poly"))
 
 # OUTPUT
-Response: Shannon_H
+# Response: Shannon_H
 #            Sum Sq   Df F value    Pr(>F)    
 # (Intercept) 4.4848    1 63.5342 1.471e-11 ***
 # NOME_TRATTO 0.0868    2  0.6147    0.5435    
@@ -264,21 +269,15 @@ Response: Shannon_H
 
 
 
- ==============================================================================
+# ==============================================================================
 # COSTRUZIONE TABELLA ANCOVA SHANNON DI TIPO III
 # ==============================================================================
-# ==============================================================================
-# COSTRUZIONE TABELLA ANCOVA SHANNON DI TIPO III (CORRETTO SENZA COPIARE TESTO EXTRA)
-# ==============================================================================
-library(car)
-library(dplyr)
-library(flextable)
-library(officer)
 
-# 1. Salvo l'output del test di Tipo III in un oggetto tabella
+
+# Salvo l'output del test di Tipo III in un oggetto tabella
 ancova_tipo3 <- Anova(modello_H_lineare, type = "III")
 
-# 2. Trasformo l'oggetto in un dataframe pulito includendo i Residui
+# Trasformo l'oggetto in un dataframe pulito includendo i Residui
 dati_tabella_h <- as.data.frame(ancova_tipo3) %>%
   rownames_to_column(var = "Sorgente") %>%
   mutate(Sorgente = case_when(
@@ -293,7 +292,7 @@ dati_tabella_h <- as.data.frame(ancova_tipo3) %>%
   # Riordino le colonne per il layout classico
   select(Sorgente, Df, SS = `Sum Sq`, MS, F_val = `F value`, p_val = `Pr(>F)`)
 
-# 3. Costruzione della flextable con funzioni native aggiornate
+# Costruzione della flextable con funzioni native aggiornate
 tabella_h <- flextable(dati_tabella_h) %>%
   set_header_labels(
     Sorgente = "Sorgente di Variazione",
@@ -314,7 +313,7 @@ tabella_h <- flextable(dati_tabella_h) %>%
   flextable::align(align = "center", part = "all") %>%
   flextable::align(j = "Sorgente", align = "left", part = "all")
 
-# 4. Creo il documento Word e salvo
+#  Creo il documento Word e salvo
 doc_tabella_h <- read_docx()
 doc_tabella_h <- body_add_par(
   doc_tabella_h, 
@@ -326,20 +325,20 @@ doc_tabella_h <- body_add_flextable(doc_tabella_h, value = tabella_h)
 print(doc_tabella_h, target = "C:/RTesi/Tabella_h_ANCOVA_Shannon_Reale.docx")
 print("--- TABELLA h REALE DI TIPO III GENERATA IN WORD CON SUCCESSO ---")
 
-  # ==============================================================================
-  # ANOVA sull'Indice di EveNness includendo l'NDVI come covariata (ANCOVA)
-  # ==============================================================================
-  anova_J <- aov(Evenness_J ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
-  print("--- RISULTATI ANCOVA EVEnNESS (J') CON NDVI ---")
-  print(summary(anova_J))
-  
-  shapiro.test(residuals(anova_J)) # p-value =  1.317e-09, è MOLTO inferiore a 0,05, i residui non sono normali
-  
-  levene_J <- leveneTest(Evenness_J ~ NOME_TRATTO, data = dataset_analisi_1)
-  print(levene_J) #p-value = 0.2678 > p-vaue 0,05; quindi le varianze dovrebbero essere omogenee
-  
-  # Dato il problema con Shapiro non sono andata avanti, ma ho provato i modelli lineari
-  
+# ==============================================================================
+# ANOVA sull'Indice di Evenness includendo l'NDVI come covariata (ANCOVA)
+# ==============================================================================
+anova_J <- aov(Evenness_J ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
+print("--- RISULTATI ANCOVA EVEnNESS (J') CON NDVI ---")
+print(summary(anova_J))
+
+shapiro.test(residuals(anova_J)) # p-value =  1.317e-09, è MOLTO inferiore a 0,05, i residui non sono normali
+
+levene_J <- leveneTest(Evenness_J ~ NOME_TRATTO, data = dataset_analisi_1)
+print(levene_J) #p-value = 0.2678 > p-vaue 0,05; quindi le varianze dovrebbero essere omogenee
+
+# Dato il problema con Shapiro non sono andata avanti, ma ho provato i modelli lineari
+
 
 # ==============================================================================
 # ATTENZIONE!!
@@ -355,88 +354,88 @@ print("--- TABELLA h REALE DI TIPO III GENERATA IN WORD CON SUCCESSO ---")
 # quindi qui sotto ci sono tre sezioni separate per i tre indici di diversità
 # ==============================================================================
 
-  ## ==============================================================================
-  ## ---- GLM: RICCHEZZA ----
-  ## ==============================================================================
+## ==============================================================================
+## ---- GLM: RICCHEZZA ----
+## ==============================================================================
+
+# Modello con Tratto e NDVI come predittori - passando al GLM,
+# possiamo già inserire altre variabili esplicative come l'NDVI
+
+{
+  glm_poisson <- glm(
+    Ricchezza_S ~ NOME_TRATTO + NDVI,
+    family = poisson(link = "log"),
+    data = dataset_analisi_1
+  )
   
-  # Modello con Tratto e NDVI come predittori - passando al GLM,
-  # possiamo già inserire altre variabili esplicative come l'NDVI
- 
-  {
-    glm_poisson <- glm(
-      Ricchezza_S ~ NOME_TRATTO + NDVI,
-      family = poisson(link = "log"),
-      data = dataset_analisi_1
-    )
-    
-    ### ---- VERIFICA DEGLI ASSUNTI: SOVRADISPERSIONE (Overdispersion) e SOTTODISPERSIONE (Underdispersion) -----
-    # Nei dati di Poisson, la varianza dovrebbe essere uguale alla media.
-    # Se la varianza è molto più alta, il modello sottostima gli errori (p-value falsamente troppo significativi).
-    # Un modo rapido per controllarla è dividere la Residual Deviance per i Gradi di Libertà (Df):
-    
-    residual_deviance <- glm_poisson$deviance
-    df_residual <- glm_poisson$df.residual
-    ratio_dispersione <- residual_deviance / df_residual
-  }
+  ### ---- VERIFICA DEGLI ASSUNTI: SOVRADISPERSIONE (Overdispersion) e SOTTODISPERSIONE (Underdispersion) -----
+  # Nei dati di Poisson, la varianza dovrebbe essere uguale alla media.
+  # Se la varianza è molto più alta, il modello sottostima gli errori (p-value falsamente troppo significativi).
+  # Un modo rapido per controllarla è dividere la Residual Deviance per i Gradi di Libertà (Df):
   
-  cat("\nRatio di dispersione:", ratio_dispersione, "\n")
-  # REGOLA: Se il ratio è vicino a 1 (es. tra 0.7 e 1.3), la Poisson va bene.
-  # Se è decisamente > 1.3, c'è sovradispersione!
-  # Se è inferiore a 0.7, c'è sottodispersione (raro)
-  
-  # OUTPUT - Ratio di dispersione: 0.6476735  
-  # Direi che siamo nel secondo caso
-  
+  residual_deviance <- glm_poisson$deviance
+  df_residual <- glm_poisson$df.residual
+  ratio_dispersione <- residual_deviance / df_residual
+}
+
+cat("\nRatio di dispersione:", ratio_dispersione, "\n")
+# REGOLA: Se il ratio è vicino a 1 (es. tra 0.7 e 1.3), la Poisson va bene.
+# Se è decisamente > 1.3, c'è sovradispersione!
+# Se è inferiore a 0.7, c'è sottodispersione (raro)
+
+# OUTPUT - Ratio di dispersione: 0.6476735  
+# Direi che siamo nel secondo caso
+
 ### ================================================================================================
 ### ---- SELEZIONE AUTOMATICA DEL MODELLO CHE TIENE CONTO DI EVENTUALI PROBLEMI DI DISPERSIONE -----
 ### ================================================================================================
-  {
-    if (ratio_dispersione > 1.3) {
-# --- CASO A: SOVRADISPERSIONE -> NEGATIVE BINOMIAL ---
-      print("--- RILEVATA SOVRADISPERSIONE: Eseguo il GLM Binomiale Negativa ---")
-      
-      glm_ricchezza_finale <- glm.nb(
-        Ricchezza_S ~ NOME_TRATTO + NDVI,
-        data = dataset_analisi_1
-      )
-    } else if (ratio_dispersione < 0.7) {
-# --- CASO B: SOTTODISPERSIONE -> QUASIPOISSON ---
-      print(
-        "--- RILEVATA SOTTODISPERSIONE: Uso Quasipoisson per correggere gli errori ---"
-      )
-      
-      glm_ricchezza_finale <- glm(
-        Ricchezza_S ~ NOME_TRATTO + NDVI,
-        family = quasipoisson(link = "log"),
-        data = dataset_analisi_1
-      )
-    } else {
-# --- CASO C: DISPERSIONE NELLA NORMA -> POISSON ---
-      print(
-        "--- DISPERSIONE NELLA NORMA: Procedo con il GLM Poisson classico ---"
-      )
-      glm_ricchezza_finale <- glm_poisson
-    }
+{
+  if (ratio_dispersione > 1.3) {
+    # --- CASO A: SOVRADISPERSIONE -> NEGATIVE BINOMIAL ---
+    print("--- RILEVATA SOVRADISPERSIONE: Eseguo il GLM Binomiale Negativa ---")
+    
+    glm_ricchezza_finale <- glm.nb(
+      Ricchezza_S ~ NOME_TRATTO + NDVI,
+      data = dataset_analisi_1
+    )
+  } else if (ratio_dispersione < 0.7) {
+    # --- CASO B: SOTTODISPERSIONE -> QUASIPOISSON ---
+    print(
+      "--- RILEVATA SOTTODISPERSIONE: Uso Quasipoisson per correggere gli errori ---"
+    )
+    
+    glm_ricchezza_finale <- glm(
+      Ricchezza_S ~ NOME_TRATTO + NDVI,
+      family = quasipoisson(link = "log"),
+      data = dataset_analisi_1
+    )
+  } else {
+    # --- CASO C: DISPERSIONE NELLA NORMA -> POISSON ---
+    print(
+      "--- DISPERSIONE NELLA NORMA: Procedo con il GLM Poisson classico ---"
+    )
+    glm_ricchezza_finale <- glm_poisson
   }
+}
 # OUTPUT - [1] "--- RILEVATA SOTTODISPERSIONE: Uso Quasipoisson per correggere gli errori ---"
-  
-  print("--- SUMMARY DEL GLM ---")
-  summary(glm_ricchezza_finale)
-  
-  
+
+print("--- SUMMARY DEL GLM ---")
+summary(glm_ricchezza_finale)
+
+
 ### ================================================================================================
 ### ---- TEST POST-HOC PER IL GLM (Confronti a coppie tra Tratti) -----
 ### ================================================================================================
 # Nel GLM non si usa TukeyHSD(). Usiamo il pacchetto 'emmeans' per i confronti a coppie
-  
-  print("--- CONFRONTI POST-HOC TRA TRATTI (EMMEANS) ---")
+
+print("--- CONFRONTI POST-HOC TRA TRATTI (EMMEANS) ---")
 # type = "response" ci restituisce i valori già trasformati dalla scala logaritmica a quella reale dei conteggi
-  confronti_tratti <- emmeans(
-    glm_ricchezza_finale,
-    specs = pairwise ~ NOME_TRATTO,
-    type = "response"
-  )
-  print(confronti_tratti$contrasts)
+confronti_tratti <- emmeans(
+  glm_ricchezza_finale,
+  specs = pairwise ~ NOME_TRATTO,
+  type = "response"
+)
+print(confronti_tratti$contrasts)
 
 # Il p-value sempre > 0,05
 
@@ -519,7 +518,7 @@ print("--- TABELLA 1 WORD GENERATA CON SUCCESSO ---")
   # se gli assunti dell'anova non erano rispettati, molto probabilmente ci saranno problemi
   # anche con il GLM gaussian o gamma se non trasformiamo i dati
   # usiamo una gaussiana quindi di fatto questo è un linear model (lm)
-
+  
   ### ---- Trasformazione BoxCox -----
   # faccio quindi subito una trasformazione BoxCox per raggiungere per quanto possibile la normalità
   {
@@ -534,7 +533,7 @@ print("--- TABELLA 1 WORD GENERATA CON SUCCESSO ---")
     dataset_analisi_1 <- dataset_analisi_1 |>
       mutate(Shannon_H_transf = Shannon_H_pos^potenza)
   }
-
+  
   ### ---- Modello di regressione -----
   {
     lm_shannon <- lm(
@@ -555,7 +554,7 @@ print("--- TABELLA 1 WORD GENERATA CON SUCCESSO ---")
   #     data = dataset_analisi_1
   #   )
   # }
-
+  
   ### ================================================================================================
   ### ---- TEST POST-HOC PER IL lLM (Confronti a coppie tra tratti) -----
   ### ================================================================================================
@@ -564,9 +563,9 @@ print("--- TABELLA 1 WORD GENERATA CON SUCCESSO ---")
 }
 
 
- # Monte - Tagli    p-value   0.6097
- # Monte - Valle    p-value  0.9961
- # Tagli - Valle    p-value  0.7760
+# Monte - Tagli    p-value   0.6097
+# Monte - Valle    p-value  0.9961
+# Tagli - Valle    p-value  0.7760
 #  p-value sempre > 0,05
 
 
@@ -574,43 +573,43 @@ print("--- TABELLA 1 WORD GENERATA CON SUCCESSO ---")
 ### ==============================================================================
 ### ---- GLM: PIELOU ----
 ### ==============================================================================
-  {
-    print("--- REGRESSIONE BETA PER EVENNESS DI PIELOU (J') ---")
-    # install.packages("betareg")
-    library(betareg)
-    
-    # Nota: la regressione Beta richiede che i valori siano strettamente COMPRESI tra 0 e 1.
-    # Se ci sono valori esattamente uguali a 1 (es. segmenti con una sola specie dove J è non calcolabile o forzato a 1),
-    # vanno rimossi o trasformati leggermente.
-    
-    dataset_beta <- dataset_analisi_1 %>%
-      filter(Evenness_J > 0 & Evenness_J < 1)
-    
-    # Costruzione del modello Beta
-    modello_beta_j <- betareg(
-      Evenness_J ~ NOME_TRATTO + NDVI,
-      data = dataset_beta
-    )
-  }
-  summary(modello_beta_j)
+{
+  print("--- REGRESSIONE BETA PER EVENNESS DI PIELOU (J') ---")
+  # install.packages("betareg")
+  library(betareg)
   
-  # Tutti i p-value sono sopra la soglia
+  # Nota: la regressione Beta richiede che i valori siano strettamente COMPRESI tra 0 e 1.
+  # Se ci sono valori esattamente uguali a 1 (es. segmenti con una sola specie dove J è non calcolabile o forzato a 1),
+  # vanno rimossi o trasformati leggermente.
   
+  dataset_beta <- dataset_analisi_1 %>%
+    filter(Evenness_J > 0 & Evenness_J < 1)
+  
+  # Costruzione del modello Beta
+  modello_beta_j <- betareg(
+    Evenness_J ~ NOME_TRATTO + NDVI,
+    data = dataset_beta
+  )
+}
+summary(modello_beta_j)
+
+# Tutti i p-value sono sopra la soglia
+
 ### ================================================================================================
 ### ---- TEST POST-HOC PER IL GLM (Confronti a coppie tra Tratti) -----
 ### ================================================================================================
-  {
+{
   posthoc_pielou <- emmeans(
     modello_beta_j,
     specs = pairwise ~ NOME_TRATTO,
     type = "response"
   )
   print(posthoc_pielou$contrasts)
-  }
+}
 
 # Non sembrano esserci differenze significative
-  
-  
+
+
 # =====================================================================
 # CREAZIONE TABELLA REGRESSIONE BETA EVENNESS (J')
 # =====================================================================
@@ -756,102 +755,88 @@ ggsave(
 print("Grafico a barre classico salvato correttamente!")
 
 
+# =====================================================================
+# ---- PERMANOVA ----
+# =====================================================================
+
+library(vegan)
+
+# Ordino i metadati ambientali per farli combaciare perfettamente con le righe della matrice
+metadati_permanova <- dataset_analisi_1 %>%
+  filter(ID_SEGMENTO %in% rownames(matrice_comunita)) %>%
+  arrange(match(ID_SEGMENTO, rownames(matrice_comunita)))
+
+# Eseguiamo la PERMANOVA (Distanza di Bray-Curtis sui conteggi)
+permanova_2025 <- adonis2(matrice_comunita ~ NOME_TRATTO, data = metadati_permanova, method = "bray")
+print(permanova_2025)
+
+# =====================================================================
+# ---- CONFRONTI POST-HOC DELLA PERMANOVA (2025) ----
+# =====================================================================
+
+# install.packages("devtools")
+# devtools::install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
+
+library(pairwiseAdonis)
+
+# Ordiniamo e verifichiamo i metadati per farli combaciare con la matrice comunità
+metadati_permanova <- dataset_analisi_1 %>%
+  filter(ID_SEGMENTO %in% rownames(matrice_comunita)) %>%
+  arrange(match(ID_SEGMENTO, rownames(matrice_comunita)))
+
+#  ESECUZIONE DEL TEST A COPPIE
+# Usiamo la distanza di Bray-Curtis sui conteggi biologici
+# La correzione "bonferroni" o "holm" serve per blindare i p-value
+post_hoc_permanova <- pairwise.adonis2(
+  matrice_comunita ~ NOME_TRATTO, 
+  data = metadati_permanova,
+  method = "bray",
+  p.adjust.m = "bonferroni" # Correzione rigorosa per confronti multipli
+)
+
+#  VISUALIZZAZIONE DEI RISULTATI
+# Questo comando ti mostrerà i p-value e l'R2 per ciascuna coppia di tratti
+print(post_hoc_permanova)
 
 
-  # =====================================================================
-  # ---- PERMANOVA ----
-  # =====================================================================
-  
-  library(vegan)
-  
-  # Ordino i metadati ambientali per farli combaciare perfettamente con le righe della matrice
-  metadati_permanova <- dataset_analisi_1 %>%
-    filter(ID_SEGMENTO %in% rownames(matrice_comunita)) %>%
-    arrange(match(ID_SEGMENTO, rownames(matrice_comunita)))
-  
-  # Eseguiamo la PERMANOVA (Distanza di Bray-Curtis sui conteggi)
-  permanova_2025 <- adonis2(matrice_comunita ~ NOME_TRATTO, data = metadati_permanova, method = "bray")
-  print(permanova_2025)
-  
-  # =====================================================================
-  # ---- CONFRONTI POST-HOC DELLA PERMANOVA (2025) ----
-  # =====================================================================
-  
-  # install.packages("devtools")
-  # devtools::install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
-  
-  library(pairwiseAdonis)
-  
-  # Ordiniamo e verifichiamo i metadati per farli combaciare con la matrice comunità
-  metadati_permanova <- dataset_analisi_1 %>%
-    filter(ID_SEGMENTO %in% rownames(matrice_comunita)) %>%
-    arrange(match(ID_SEGMENTO, rownames(matrice_comunita)))
-  
-  # 2. ESECUZIONE DEL TEST A COPPIE
-  # Usiamo la distanza di Bray-Curtis sui conteggi biologici
-  # La correzione "bonferroni" o "holm" serve per blindare i p-value
-  post_hoc_permanova <- pairwise.adonis2(
-    matrice_comunita ~ NOME_TRATTO, 
-    data = metadati_permanova,
-    method = "bray",
-    p.adjust.m = "bonferroni" # Correzione rigorosa per confronti multipli
-  )
-  
-  # 3. VISUALIZZAZIONE DEI RISULTATI
-  # Questo comando ti mostrerà i p-value e l'R2 per ciascuna coppia di tratti
-  print(post_hoc_permanova)
 
+# =====================================================================
+# ---- GRAFICO ANALISI DELLE COORDINATE PRINCIPALI (PCoA) ----
+# =====================================================================
+library(vegan)
+library(ggplot2)
 
-  
-  # =====================================================================
-  # ---- GRAFICO ANALISI DELLE COORDINATE PRINCIPALI (PCoA) ----
-  # =====================================================================
-  library(vegan)
-  library(ggplot2)
-  
-  #  Calcolo la matrice di distanza biologica di Bray-Curtis
-  dist_bray <- vegdist(matrice_comunita, method = "bray")
-  
-  # Eseguo la PCoA (MDS metrico)
-  pcoa_risultato <- cmdscale(dist_bray, k = 2, eig = TRUE)
+#  Calcolo la matrice di distanza biologica di Bray-Curtis
+dist_bray <- vegdist(matrice_comunita, method = "bray")
 
- # Isolo solo gli autovalori positivi (> 0)
- # Evita la sovrastima artificiale della varianza spiegata legata a distanze non-euclidee
- autovalori_positivi <- pcoa_risultato$eig[pcoa_risultato$eig > 0]
+#   Eseguo la PCoA corretta usando wcmdscale di vegan (ottimale per Bray-Curtis)
+pcoa_risultato <- wcmdscale(dist_bray, eig = TRUE)
 
- # Calcolo la percentuale di varianza spiegata dai primi due assi
- var_spiegata <- round(100 * pcoa_risultato$eig / sum(autovalori_positivi), 1)
- asse1_var <- var_spiegata[1]
- asse2_var <- var_spiegata[2]
+# Calcolo corretto della varianza spiegata (escludendo le componenti negative)
+autovalori <- pcoa_risultato$eig
+autovalori_pos <- autovalori[autovalori > 0]
+somma_auto_pos <- sum(autovalori_pos)
 
- # Estraggo le coordinate dei siti per il grafico
- punti_pcoa <- as.data.frame(pcoa_risultato$points)
- colnames(punti_pcoa) <- c("PCoA1", "PCoA2")
- punti_pcoa$ID_SEGMENTO <- rownames(punti_pcoa)
-  
-  # Unisco i metadati dei tratti
-  punti_grafico_pcoa <- punti_pcoa %>%
+asse1_var <- round(100 * autovalori_pos[1] / somma_auto_pos, 1)
+asse2_var <- round(100 * autovalori_pos[2] / somma_auto_pos, 1)
+
+# Estraggo le coordinate dei siti per il grafico
+punti_pcoa <- as.data.frame(pcoa_risultato$points[, 1:2])
+colnames(punti_pcoa) <- c("PCoA1", "PCoA2")
+punti_pcoa$ID_SEGMENTO <- rownames(punti_pcoa)
+
+# 5. Unisco i metadati dei tratti
+punti_grafico_pcoa <- punti_pcoa %>%
   left_join(metadati_permanova, by = "ID_SEGMENTO") %>%
   mutate(NOME_TRATTO = factor(NOME_TRATTO, levels = c("Monte", "Tagli", "Valle")))
 
-
-  # Palette cromatica ad alta leggibilità
-  scale_color_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
-  scale_fill_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
-  labs(
-
-
-
-
-
-
-  # GRAFICO PCoA CON ELLISSI DI CONFIDENZA
- grafico_pcoa <- ggplot(punti_grafico_pcoa, aes(x = PCoA1, y = PCoA2, color = NOME_TRATTO, fill = NOME_TRATTO)) +
-  # Ellissi che racchiudono il 95% della distribuzione (usiamo stat_ellipse standard)
+# COSTRUZIONE DEL GRAFICO GGPLOT2 
+grafico_pcoa <- ggplot(punti_grafico_pcoa, aes(x = PCoA1, y = PCoA2, color = NOME_TRATTO, fill = NOME_TRATTO)) +
+  # Ellissi che racchiudono il 95% della distribuzione
   stat_ellipse(geom = "polygon", alpha = 0.1, linewidth = 0.5, linetype = "dashed", level = 0.95) +
   # Punti dei segmenti campionati
   geom_point(size = 3.5, alpha = 0.85, shape = 21, color = "black") +
-  # Palette cromatica ad alta leggibilità
+  # Palette cromatica ad alta leggibilità (Verde = Monte, Rosso = Tagli, Blu = Valle)
   scale_color_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
   scale_fill_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
   labs(
@@ -872,85 +857,150 @@ print("Grafico a barre classico salvato correttamente!")
 # Mostra il grafico a schermo
 print(grafico_pcoa)
 
-# Salva l'immagine in alta definizione per la stampa della tesi
+# Salva l'immagine in alta definizione per la tesi
 ggsave("C:/RTesi/grafico_pcoa_comunita.png", plot = grafico_pcoa, width = 8, height = 6.5, dpi = 300)
+print("--- GRAFICO PCoA GENERATO E SALVATO CON SUCCESSO ---")
 
 
+# =====================================================================
+# ---- CODICE RISOLUTIVO TABELLA PERMANOVA COMPLETA PER WORD ----
+# =====================================================================
+library(tidyverse)
+library(flextable)
+library(officer)
 
-  # =====================================================================
-  # ---- CODICE RISOLUTIVO TABELLA PERMANOVA COMPLETA PER WORD ----
-  # =====================================================================
-  library(tidyverse)
-  library(flextable)
-  library(officer)
-  
-  # --- COSTRUisco DATAFRAME DELLA PERMANOVA GLOBALE ---
-  permanova_global_df <- as.data.frame(permanova_2025) %>%
-    rownames_to_column(var = "Componente") %>%
-    mutate(Componente = case_when(
-      Componente == "Model" ~ "Modello (Tratto di Fiume)",
-      Componente == "Residual" ~ "Residuo",
-      Componente == "Total" ~ "Totale",
-      TRUE ~ Componente
-    )) %>%
-    select(
-      Sorgente = Componente,
-      Df,
-      SS = SumOfSqs,
-      R2,
-      F_stat = F,
-      p_value = `Pr(>F)`
-    )
-  
-  # --- COSTRUISCO DATAFRAME DEI CONFRONTI POST-HOC ---
-  permanova_posthoc_df <- tibble(
-    Sorgente = c("  - Valle vs Monte", "  - Valle vs Tagli", "  - Monte vs Tagli"),
-    Df      = c(1, 1, 1),
-    SS      = c(0.662, 1.013, 0.618),
-    R2      = c(0.081, 0.120, 0.087),
-    F_stat  = c(4.476, 6.954, 4.565),
-    p_value = c(0.003, 0.003, 0.003) # P-value già corretti con Bonferroni
+# --- COSTRUisco DATAFRAME DELLA PERMANOVA GLOBALE ---
+permanova_global_df <- as.data.frame(permanova_2025) %>%
+  rownames_to_column(var = "Componente") %>%
+  mutate(Componente = case_when(
+    Componente == "Model" ~ "Modello (Tratto di Fiume)",
+    Componente == "Residual" ~ "Residuo",
+    Componente == "Total" ~ "Totale",
+    TRUE ~ Componente
+  )) %>%
+  select(
+    Sorgente = Componente,
+    Df,
+    SS = SumOfSqs,
+    R2,
+    F_stat = F,
+    p_value = `Pr(>F)`
   )
-  
-  # --- UNIONISCO LE DUE COMPONENTI ---
-  tabella_permanova_completa <- rbind(
-    permanova_global_df[1, ], 
-    permanova_posthoc_df,     
-    permanova_global_df[2:3, ] 
-  )
-  
-  # --- FORMATTO LA GRAFICA CON FLEXTABLE---
-  ft_permanova <- flextable(tabella_permanova_completa) %>%
-    # Intestazioni formali in italiano
-    set_header_labels(
-      Sorgente = "Sorgente di Variazione / Contrasti",
-      Df       = "Gdf",
-      SS       = "Somma Quadrati (SS)",
-      R2       = "R²",
-      F_stat   = "Valore F",
-      p_value  = "p-value"
+
+# --- COSTRUISCO DATAFRAME DEI CONFRONTI POST-HOC ---
+permanova_posthoc_df <- tibble(
+  Sorgente = c("  - Valle vs Monte", "  - Valle vs Tagli", "  - Monte vs Tagli"),
+  Df      = c(1, 1, 1),
+  SS      = c(0.662, 1.013, 0.618),
+  R2      = c(0.081, 0.120, 0.087),
+  F_stat  = c(4.476, 6.954, 4.565),
+  p_value = c(0.003, 0.003, 0.003) # P-value già corretti con Bonferroni
+)
+
+# --- UNIONISCO LE DUE COMPONENTI ---
+tabella_permanova_completa <- rbind(
+  permanova_global_df[1, ], 
+  permanova_posthoc_df,     
+  permanova_global_df[2:3, ] 
+)
+
+# --- FORMATTO LA GRAFICA CON FLEXTABLE---
+ft_permanova <- flextable(tabella_permanova_completa) %>%
+  # Intestazioni formali in italiano
+  set_header_labels(
+    Sorgente = "Sorgente di Variazione / Contrasti",
+    Df       = "Gdf",
+    SS       = "Somma Quadrati (SS)",
+    R2       = "R²",
+    F_stat   = "Valore F",
+    p_value  = "p-value"
+  ) %>%
+  # Formattazione numerica italiana e gestione automatica degli NA (diventano vuoti "")
+  colformat_double(j = c("SS", "R2", "F_stat"), digits = 3, decimal.mark = ",", na_str = "") %>%
+  colformat_double(j = "p_value", digits = 3, decimal.mark = ",", na_str = "") %>%
+  colformat_int(j = "Df") %>%
+  # Stile 
+  theme_booktabs() %>%
+  autofit() %>%
+  bold(part = "header") %>%
+  # Evidenziamo in grassetto i fattori significativi escludendo gli NA per sicurezza
+  bold(i = ~ !is.na(p_value) & p_value < 0.05, j = c("Sorgente", "p_value")) %>%
+  # Allineamenti assi risolvendo i conflitti con il pacchetto terra
+  flextable::align(align = "center", part = "all") %>%
+  flextable::align(j = "Sorgente", align = "left", part = "all")
+
+# --- ESPORTO IN WORD ---
+doc_permanova <- read_docx()
+doc_permanova <- body_add_par(doc_permanova, "Tabella X.X. Risultati del test di Permutazione dell'Analisi della Varianza Multivariata (PERMANOVA) basata su distanze di Bray-Curtis per la comunità ornitica (Anno 2025) e relativi confronti post-hoc a coppie.", style = "Normal")
+doc_permanova <- body_add_flextable(doc_permanova, value = ft_permanova)
+
+print(doc_permanova, target = "C:/RTesi/tabella_permanova_completa.docx")
+print("--- TABELLA PERMANOVA GENERATA CON SUCCESSO IN C:/RTesi/tabella_permanova_completa.docx ---")#
+
+
+# =====================================================================
+# ---- ANALISI SIMPER (IDENTIFICAZIONE DELLE SPECIE CHIAVE) ----
+# =====================================================================
+
+# Esecuzione della SIMPER sulla matrice trasformata (coerente con PCoA)
+# Uso sqrt(matrice_comunita) per non far schiacciare i risultati dalle specie iper-abbondanti
+simper_risultato <- simper(sqrt(matrice_comunita), group = metadati_permanova$NOME_TRATTO, permutations = 999)
+
+# Trasformo l'output in un riassunto leggibile
+summary_simper <- summary(simper_risultato)
+
+# Estrazione automatica delle TOP 5 specie responsabili per ogni confronto
+tabella_simper_dati <- tibble()
+nomi_confronti <- names(summary_simper)
+
+for (confronto in nomi_confronti) {
+  df_comp <- as.data.frame(summary_simper[[confronto]]) %>%
+    rownames_to_column(var = "Specie") %>%
+    # Calcolo il contributo percentuale singolo e cumulativo
+    mutate(
+      Contrib_Percentuale = (average / sum(average)) * 100,
+      Cumul_Percentuale   = cumsum(Contrib_Percentuale),
+      Confronto_Tratti     = confronto
     ) %>%
-    # Formattazione numerica italiana e gestione automatica degli NA (diventano vuoti "")
-    colformat_double(j = c("SS", "R2", "F_stat"), digits = 3, decimal.mark = ",", na_str = "") %>%
-    colformat_double(j = "p_value", digits = 3, decimal.mark = ",", na_str = "") %>%
-    colformat_int(j = "Df") %>%
-    # Stile 
-    theme_booktabs() %>%
-    autofit() %>%
-    bold(part = "header") %>%
-    # Evidenziamo in grassetto i fattori significativi escludendo gli NA per sicurezza
-    bold(i = ~ !is.na(p_value) & p_value < 0.05, j = c("Sorgente", "p_value")) %>%
-    # Allineamenti assi risolvendo i conflitti con il pacchetto terra
-    flextable::align(align = "center", part = "all") %>%
-    flextable::align(j = "Sorgente", align = "left", part = "all")
+    # Isolo le prime 5 specie con il contributo più alto
+    slice_head(n = 5) %>%
+    select(Confronto_Tratti, Specie, Contrib_Percentuale, Cumul_Percentuale)
   
-  # --- ESPORTO IN WORD ---
-  doc_permanova <- read_docx()
-  doc_permanova <- body_add_par(doc_permanova, "Tabella X.X. Risultati del test di Permutazione dell'Analisi della Varianza Multivariata (PERMANOVA) basata su distanze di Bray-Curtis per la comunità ornitica (Anno 2025) e relativi confronti post-hoc a coppie.", style = "Normal")
-  doc_permanova <- body_add_flextable(doc_permanova, value = ft_permanova)
-  
-  print(doc_permanova, target = "C:/RTesi/tabella_permanova_completa.docx")
-  print("--- TABELLA PERMANOVA GENERATA CON SUCCESSO IN C:/RTesi/tabella_permanova_completa.docx ---")#
+  tabella_simper_dati <- bind_rows(tabella_simper_dati, df_comp)
+}
+
+# Formattazione estetica della tabella con flextable 
+tabella_simper_word <- flextable(tabella_simper_dati) %>%
+  set_header_labels(
+    Confronto_Tratti    = "Confronto a Coppie",
+    Specie              = "Specie di Uccello",
+    Contrib_Percentuale = "Contributo Singolo (%)",
+    Cumul_Percentuale   = "Contributo Cumulativo (%)"
+  ) %>%
+  # Unisce verticalmente le celle con lo stesso nome di confronto per non ripetere il testo
+  merge_v(j = "Confronto_Tratti") %>%
+  # Converte il punto in virgola ed evita warning di sistema
+  colformat_double(j = c("Contrib_Percentuale", "Cumul_Percentuale"), digits = 2, decimal.mark = ",", big.mark = "") %>%
+  # Applica lo stile accademico Booktabs
+  theme_booktabs() %>%
+  autofit() %>%
+  bold(part = "header") %>%
+  flextable::align(align = "center", part = "all") %>%
+  flextable::align(j = c("Confronto_Tratti", "Specie"), align = "left", part = "all") %>%
+  # Risolve eventuali sovrapposizioni grafiche nei bordi
+  fix_border_issues()
+
+# Creazione ed esportazione del file Word
+doc_simper <- read_docx()
+doc_simper <- body_add_par(
+  doc_simper, 
+  "Tabella 11 - Risultati dell'analisi SIMPER: prime 5 specie di uccelli responsabili della dissomiglianza nella composizione della comunità tra i tratti monitorati (Anno 2025). Le abbondanze sono state precedentemente trasformate tramite radice quadrata.", 
+  style = "Normal"
+)
+doc_simper <- body_add_flextable(doc_simper, value = tabella_simper_word)
+
+print(doc_simper, target = "C:/RTesi/Tabella_11_SIMPER_2025.docx")
+print("--- TABELLA SIMPER GENERATA CON SUCCESSO IN WORD ---")
 
 
 
@@ -1108,71 +1158,6 @@ ggsave(filename = "C:/RTesi/Grafico_Specialisti_2025.png", plot = grafico_barre,
 
 
 # =====================================================================
-# ---- ANALISI SIMPER (IDENTIFICAZIONE DELLE SPECIE CHIAVE) ----
-# =====================================================================
-
-# 1. Esecuzione della SIMPER sulla matrice trasformata (coerente con PCoA)
-# Usiamo sqrt(matrice_comunita) per non far schiacciare i risultati dalle specie iper-abbondanti
-simper_risultato <- simper(sqrt(matrice_comunita), group = metadati_permanova$NOME_TRATTO, permutations = 999)
-
-# Trasformiamo l'output in un riassunto leggibile
-summary_simper <- summary(simper_risultato)
-
-# 2. Estrazione automatica delle TOP 5 specie responsabili per ogni confronto
-tabella_simper_dati <- tibble()
-nomi_confronti <- names(summary_simper)
-
-for (confronto in nomi_confronti) {
-  df_comp <- as.data.frame(summary_simper[[confronto]]) %>%
-    rownames_to_column(var = "Specie") %>%
-    # Calcoliamo il contributo percentuale singolo e cumulativo
-    mutate(
-      Contrib_Percentuale = (average / sum(average)) * 100,
-      Cumul_Percentuale   = cumsum(Contrib_Percentuale),
-      Confronto_Tratti     = confronto
-    ) %>%
-    # Isoliamo le prime 5 specie con il contributo più alto
-    slice_head(n = 5) %>%
-    select(Confronto_Tratti, Specie, Contrib_Percentuale, Cumul_Percentuale)
-  
-  tabella_simper_dati <- bind_rows(tabella_simper_dati, df_comp)
-}
-
-# 3. Formattazione estetica della tabella con flextable per la tesi italiana
-tabella_simper_word <- flextable(tabella_simper_dati) %>%
-  set_header_labels(
-    Confronto_Tratti    = "Confronto a Coppie",
-    Specie              = "Specie di Uccello",
-    Contrib_Percentuale = "Contributo Singolo (%)",
-    Cumul_Percentuale   = "Contributo Cumulativo (%)"
-  ) %>%
-  # Unisce verticalmente le celle con lo stesso nome di confronto per non ripetere il testo
-  merge_v(j = "Confronto_Tratti") %>%
-  # Converte il punto in virgola ed evita warning di sistema
-  colformat_double(j = c("Contrib_Percentuale", "Cumul_Percentuale"), digits = 2, decimal.mark = ",", big.mark = "") %>%
-  # Applica lo stile accademico Booktabs
-  theme_booktabs() %>%
-  autofit() %>%
-  bold(part = "header") %>%
-  flextable::align(align = "center", part = "all") %>%
-  flextable::align(j = c("Confronto_Tratti", "Specie"), align = "left", part = "all") %>%
-  # Risolve eventuali sovrapposizioni grafiche nei bordi
-  fix_border_issues()
-
-# 4. Creazione ed esportazione del file Word
-doc_simper <- read_docx()
-doc_simper <- body_add_par(
-  doc_simper, 
-  "Tabella 11 - Risultati dell'analisi SIMPER: prime 5 specie di uccelli responsabili della dissomiglianza nella composizione della comunità tra i tratti monitorati (Anno 2025). Le abbondanze sono state precedentemente trasformate tramite radice quadrata.", 
-  style = "Normal"
-)
-doc_simper <- body_add_flextable(doc_simper, value = tabella_simper_word)
-
-print(doc_simper, target = "C:/RTesi/Tabella_11_SIMPER_2025.docx")
-print("--- TABELLA SIMPER GENERATA CON SUCCESSO IN WORD ---")
-
-
-# =====================================================================
 # ---- GLM SULLE GUILDS: NIDIFICANTI RURALI (RURAL NESTERS) ----
 # =====================================================================
 
@@ -1304,7 +1289,7 @@ grafico_rurali <- ggplot() +
   geom_point(data = dati_medie_rur, aes(x = NOME_TRATTO, y = Media, fill = NOME_TRATTO), 
              size = 4, shape = 21, color = "black") +
   
-   # Palette cromatica ad alta leggibilità
+  # Palette cromatica ad alta leggibilità
   scale_color_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
   scale_fill_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
   # Annotazione grafica del p-value significativo (Monte vs Valle)
@@ -1318,7 +1303,7 @@ grafico_rurali <- ggplot() +
     caption = "Le barre di errore indicano la Deviazione Standard (± SD). La linea tratteggiata unisce le medie."
   ) +
   # Impostazione assi discreti e limiti per dare respiro alle annotazioni
- scale_y_continuous(limits = c(0, 8), breaks = 0:8) +
+  scale_y_continuous(limits = c(0, 8), breaks = 0:8) +
   theme_minimal(base_size = 14) +
   theme(
     legend.position = "none",
@@ -1337,7 +1322,8 @@ print("--- GRAFICO RURALI ESPORTATO IN PNG ---")
 
 
 # =====================================================================
-#  GRAFICO A BARRE OTTIMIZZATO PER I NIDIFICANTI RURALI (2025)
+#  GRAFICO A BARRE OTTIMIZZATO PER I NIDIFICANTI RURALI (2025) - 
+# questo mi serve perchè è costruito come quello dei forestali
 # =====================================================================
 
 testo_caption_rur <- "Le barre rappresentano il numero medio di specie per segmento ± l'Intervallo di Confidenza (95% CI). Lettere diverse (a, b) indicano differenze statisticamente significative al test di Tukey (p < 0,05). Lettere condivise (ab) indicano assenza di differenze significative con entrambi i gruppi."
@@ -1388,3 +1374,5 @@ grafico_barre_rurali <- ggplot(dataset_rurali_ordinato, aes(x = NOME_TRATTO, y =
 # Salvo l'immagine nella cartella di lavoro della tesi
 ggsave(filename = "C:/RTesi/Grafico_Rurali_Barre_2025.png", plot = grafico_barre_rurali, width = 7, height = 6.2, dpi = 300)
 print("--- GRAFICO A BARRE PER I RURALI GENERATO E SALVATO CON SUCCESSO ---")
+
+
