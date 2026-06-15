@@ -1,151 +1,307 @@
+# =====================================================================
+# ---- CONFRONTO SPONDE: 2025 ----
+# =====================================================================
 
- library(readxl)
+# ---- packages ----
+{
+  library(tidyverse)
+  library(readxl)
   library(vegan) # per il calcolo degli indici ecologici
   library(car) # per il test di Levene (omogeneità delle varianze)
   library(MASS) # per glm.nb()
-  library(tidyverse)
-  library(vegan)
   library(emmeans) # per i confronti post-hoc dei GLM
-  library(dplyr)
-  library(flextable)
-  library(patchwork)
-  library(ggdist)
-  library(nlme)
+  library(flextable)  # per gestire e creare le varie tabelle
   library(officer)
+  library(ggplot2)  # il mio preferito per i grafici
 }
-
-# Ho dovuto risolvere un probema di conflitto tra pacchetti istallati sul mio R
-library(conflicted)
-conflict_prefer("select", "dplyr")
-conflict_prefer("filter", "dplyr")
 
 
 ## ---- load data ----
 setwd("C:/RTesi")
 
+{
+  specie <- readxl::read_xlsx(
+    "C:/RTesi/dati_ombrone_provvisori.xlsx", 
+    sheet = "Contatti_Specie" 
+  )
+  segmenti <- readxl::read_xlsx(
+    "C:/RTesi/dati_ombrone_provvisori.xlsx", 
+    sheet = "Segmenti" 
+  )
+}
+
+
+## ---- test di wilcoxon: l'impatto del taglio ha ridotto o aumentato in modo significativo il numero di specie per unità di spazio? ----
+
+# Sono ricchezze, i dati non sono normali, o comunque per analogia con il resto della tesi
+# in cui abbiamo usato quasi poisson, qui si usa Wilcoxon:
+dati_wilcoxon <- specie |>
+  filter(SPONDA %in% c("integra", "tagliata")) |> 
+  # Escludiamo eventuali zeri (se presenti nel dataset originale)
+  filter(CONTEGGIO > 0) |> 
+  # Raggruppiamo per segmento e sponda
+  group_by(ID_SEGMENTO, SPONDA) |> 
+  # Contiamo quante specie diverse ci sono (Ricchezza S)
+  summarise(Ricchezza_S = n_distinct(SPECIE), .groups = "drop")
+
+dati_wilcoxon_wide <- dati_wilcoxon |> 
+  # Affianchiamo le due sponde (Wide format)
+  pivot_wider(names_from = SPONDA, values_from = Ricchezza_S, values_fill = 0)
+
+print("--- TABELLA PER WILCOXON ---")
+print(dati_wilcoxon_wide)
+
+# Eseguiamo il test non parametrico accoppiato (paired = TRUE)
+test_wilcoxon <- wilcox.test(dati_wilcoxon_wide$integra, dati_wilcoxon_wide$tagliata, paired = TRUE)
+
+print("--- RISULTATO WILCOXON TEST ---")
+print(test_wilcoxon)
+
+# OUTPUT
+ # Wilcoxon signed rank exact test
+
+# data:  dati_wilcoxon_wide$integra and dati_wilcoxon_wide$tagliata
+# V = 295, p-value = 0.0001074
+# alternative hypothesis: true location shift is not equal to 0
+
 # =====================================================================
-# FILTRAGGIO E PREPARAZIONE DATI APPAIATI (SPONDE NEI TAGLI)
+# ---- TABELLA E GRAFICO APPAIATO: CONFRONTI SPONDE T3 (2025) ----
 # =====================================================================
 
-# Unisco i fogli specificando la relazione molti-a-molti per evitare il warning
-contatti_sponde <- specie %>%
-  left_join(
-    select(segmenti, ID_SEGMENTO, NOME_TRATTO, ANNO), 
-    by = "ID_SEGMENTO",
-    relationship = "many-to-many" # Dice a R che la struttura relazionale è voluta
-  ) %>%
-  # Filtriamo: solo Anno 2025, tratto Tagli, e sponde valide
-  filter(ANNO == 2025, NOME_TRATTO == "Tagli", SPONDA %in% c("integra", "tagliata"))
+# ---  COSTRUZIONE TABELLA UFFICIALE PER WORD ---
+# Calcolo le statistiche descrittive corrette per il test non parametrico
+stat_desc <- dati_wilcoxon_wide %>%
+  summarise(
+    N_Coppie = n(),
+    Mediana_Integra  = median(integra),
+    IQR_Integra      = IQR(integra),
+    Mediana_Tagliata = median(tagliata),
+    IQR_Tagliata     = IQR(tagliata)
+  )
 
-
-# --- CALCOLO RICCHEZZA TOTALE PER SPONDA ---
-ricchezza_sponde_tot <- contatti_sponde %>%
-  group_by(ID_SEGMENTO, SPONDA) %>%
-  summarise(S_Totale = n_distinct(SPECIE), .groups = "drop") %>%
-  pivot_wider(id_cols = ID_SEGMENTO, names_from = SPONDA, values_from = S_Totale, values_fill = 0)
-
-
-# --- CALCOLO RICCHEZZA SPECIALISTI FORESTALES PER SPONDA ---
-ricchezza_sponde_spec <- contatti_sponde %>%
-  filter(GUILD == "riparian - forestry  nesters") %>%
-  group_by(ID_SEGMENTO, SPONDA) %>%
-  summarise(S_Spec = n_distinct(SPECIE), .groups = "drop") %>%
-  pivot_wider(id_cols = ID_SEGMENTO, names_from = SPONDA, values_from = S_Spec, values_fill = 0)
-
-
-# =====================================================================
-# ESECUZIONE DEL TEST DI WILCOXON SUI DATI COMPLETI
-# =====================================================================
-
-print("=== TEST DI WILCOXON APPAIATO: RICCHEZZA TOTALE ===")
-test_wilcox_tot <- wilcox.test(ricchezza_sponde_tot$integra, 
-                               ricchezza_sponde_tot$tagliata, 
-                               paired = TRUE, conf.int = TRUE)
-print(test_wilcox_tot)
-
-print("=== TEST DI WILCOXON APPAIATO: SPECIALISTI FORESTALI ===")
-test_wilcox_spec <- wilcox.test(ricchezza_sponde_spec$integra, 
-                                ricchezza_sponde_spec$tagliata, 
-                                paired = TRUE, conf.int = TRUE)
-print(test_wilcox_spec)
-
-# =====================================================================
-# ESTRAZIONE AUTOMATICA DEI DATI DAI DUE TEST DI WILCOXON
-# =====================================================================
-
-
-library(tidyverse)
-library(flextable)
-library(officer)
-
-
-# Creo un dataframe estraendo i valori matematici reali dai test
-dati_wilcoxon <- tibble(
-  Analisi = c("Ricchezza Totale di Specie (S)", "Specialisti della Fascia Ripariale"),
-  V_stat  = c(test_wilcox_tot$statistic, test_wilcox_spec$statistic),
-  p_value = c(test_wilcox_tot$p.value, test_wilcox_spec$p.value),
-  Median  = c(test_wilcox_tot$estimate, test_wilcox_spec$estimate),
-  IC_low  = c(test_wilcox_tot$conf.int[1], test_wilcox_spec$conf.int[1]),
-  IC_up   = c(test_wilcox_tot$conf.int[2], test_wilcox_spec$conf.int[2])
+# Cro il dataframe unendo le statistiche e l'output del test (V=295, p=0.0001074)
+df_tabella_wilc <- tibble(
+  Confronto        = "Sponda Integra vs Sponda Tagliata (Tratto T3)",
+  N                = stat_desc$N_Coppie,
+  `Mediana (IQR) Integra`  = paste0(stat_desc$Mediana_Integra, " (±", stat_desc$IQR_Integra, ")"),
+  `Mediana (IQR) Tagliata` = paste0(stat_desc$Mediana_Tagliata, " (±", stat_desc$IQR_Tagliata, ")"),
+  `Statistica V`   = 295,
+  `p-value`        = 0.0001074
 )
 
-# Formatto i dati
-tabella_wilcox_dati <- dati_wilcoxon %>%
-  mutate(
-    # Gestiamo la formattazione dei p-value molto piccoli
-    p_value_pulito = case_when(
-      p_value < 0.001 ~ "< 0,001",
-      TRUE ~ as.character(round(p_value, 4))
-    ),
-    # Unisco l'intervallo di confidenza in una cella elegante [min, max]
-    IC_95 = sprintf("[%.1f; %.1f]", IC_low, IC_up),
-    Signif = "***"
-  ) %>%
-  select(Analisi, V_stat, Median, IC_95, p_value_pulito, Signif)
+# Formattazione Flextable professionale
+tabella_wilc_word <- flextable(df_tabella_wilc) %>%
+  set_header_labels(Confronto = "Ambiente di Sponda") %>%
+  colformat_double(j = "p-value", digits = 6, decimal.mark = ",", big.mark = "") %>%
+  colformat_int(j = c("N", "Statistica V"), big.mark = "") %>%
+  theme_booktabs() %>% autofit() %>% bold(part = "header") %>%
+  flextable::align(align = "center", part = "all") %>% 
+  flextable::align(j = "Confronto", align = "left", part = "all")
+
+# Esportazione Tabella in Word
+save_as_docx(tabella_wilc_word, path = "C:/RTesi/Tabella_Wilcoxon_Sponde.docx")
+
+###=====================================================================
+# --- COSTRUZIONE GRAFICO APPAIATO (PAIRED BOXPLOT) ---
+###=====================================================================
+
+# Per fare il grafico devo rimettere i dati in formato LONG
+dati_grafico_long <- dati_wilcoxon_wide %>%
+  pivot_longer(cols = c(integra, tagliata), names_to = "Sponda", values_to = "Ricchezza") %>%
+  mutate(Sponda = factor(Sponda, levels = c("integra", "tagliata"), labels = c("Sponda Integra", "Sponda Tagliata")))
+
+grafico_sponde_appaiate <- ggplot(dati_grafico_long, aes(x = Sponda, y = Ricchezza, fill = Sponda)) +
+  geom_line(aes(group = ID_SEGMENTO), color = "gray75", linewidth = 0.5, linetype = "solid") +
+  geom_boxplot(alpha = 0.3, width = 0.3, color = "gray40", outlier.shape = NA, show.legend = FALSE) +
+  geom_point(aes(color = Sponda), size = 3, alpha = 0.8, shape = 21, color = "black", show.legend = FALSE) +
+  scale_fill_manual(values = c("Sponda Integra" = "#66c2a5", "Sponda Tagliata" = "#fc8d62")) +
+  
+  annotate("path", x = c(1, 1, 2, 2), y = c(12.5, 12.8, 12.8, 12.5), color = "gray30", linewidth = 0.5) +
+  annotate("text", x = 1.5, y = 13.2, label = "p < 0,001 ***", size = 4.5, fontface = "bold", color = "firebrick") +
+  
+  labs(
+    title = "Impatto Micro-Ambientale del Taglio della Vegetazione",
+    subtitle = "Confronto appaiato della ricchezza ornitica tra le sponde dello stesso segmento (T3 - 2025)",
+    x = "Tipologia di Sponda Orografica",
+    y = "Numero di Specie per Sponda (Ricchezza S)",
+    # str_wrap spezza la frase a 65 caratteri per mandarla a capo in modo pulito
+    caption = str_wrap("Le linee grigie collegano le due sponde appartenenti alla medesima unità campionaria (ID_SEGMENTO).", width = 65)
+  ) +
+  scale_y_continuous(limits = c(0, 16), breaks = seq(0, 16, 2)) +
+  theme_classic(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, color = "gray30", hjust = 0.5, margin = margin(b = 15)),
+    axis.text.x = element_text(face = "bold", color = "black"),
+    panel.grid.major.y = element_line(color = "gray95"),
+    
+    # MODIFICA CHIAVE: Allinea la caption a sinistra (0) e imposta l'andata a capo automatica
+    plot.caption = element_text(size = 10, face = "italic", color = "dimgray", hjust = 0, lineheight = 1.2, margin = margin(t = 15)),
+    
+    # MODIFICA CHIAVE: Aggiunge un margine vuoto di sicurezza sul fondo (b = 20) per non tagliare il testo
+    plot.margin = margin(t = 10, r = 10, b = 20, l = 10, unit = "pt")
+  )
+
+# Mostra a schermo per controllo
+print(grafico_sponde_appaiate)
+
+# MODIFICA CHIAVE: Aumentiamo l'altezza da 6.2 a 6.8 pollici per dare respiro al testo in basso
+ggsave("C:/RTesi/grafico_sponde_appaiate_T3.png", plot = grafico_sponde_appaiate, width = 7.5, height = 6.8, dpi = 300)
+print("--- GRAFICO RIGENERATO CON CAPTION COMPLETA ---")
 
 
-# =====================================================================
-# CREAZIONE DELLA TABELLA FORMATTATA CON FLEXTABLE
-# =====================================================================
+###====================================================================
+## ---- chi-quadro: la struttura della comunità (chi c'è e in che proporzione) è cambiata a causa del taglio? ----
+###====================================================================
 
-ft_wilcox <- flextable(tabella_wilcox_dati) %>%
-  # Imposto le intestazioni in italiano formale
+# Creo la tabella solo con i conteggi ASSOLUTI (escludendo la colonna coi nomi delle specie)
+# tab_conteggi <- data.frame(Destra = c(15, 5, 6...), Sinistra = c(1, 0, 10...))
+
+tabella_chi_quadro <- specie |>
+  filter(SPONDA %in% c("integra", "tagliata")) |> 
+  group_by(SPECIE, SPONDA) %>%
+  # Sommo le abbondanze per ogni specie nelle due sponde
+  summarise(Abbondanza_Tot = sum(CONTEGGIO), .groups = "drop") %>%
+  # Metto 'integra' e 'tagliata' come colonne
+  pivot_wider(names_from = SPONDA, values_from = Abbondanza_Tot, values_fill = 0) %>%
+  # Sposto il nome della specie nel nome della riga (formato richiesto dal test)
+  column_to_rownames("SPECIE")
+
+# Arrotondo la tabella per sicurezza (ci sono i valori "0,5")
+tabella_chi_quadro <- round(tabella_chi_quadro, 0)
+# Elimino le "specie fantasma" (righe in cui la somma è esattamente 0)
+tabella_chi_pulita <- tabella_chi_quadro[rowSums(tabella_chi_quadro) > 0, ]
+
+print("--- TABELLA PER CHI-QUADRO ---")
+head(tabella_chi_pulita)
+
+# Eseguo il test con simulazione Monte Carlo (Risolve il Warning)
+# L'approssimazione al Chi-quadrato potrebbe essere inesatta
+set.seed(123)
+test_chi <- chisq.test(tabella_chi_pulita, simulate.p.value = TRUE, B = 9999)
+
+print("--- RISULTATO CHI-QUADRO ---")
+print(test_chi)
+
+# OUTPUT 
+# Pearson's Chi-squared test with simulated p-value (based on 9999 replicates)
+# data:  tabella_chi_pulita
+# X-squared = 119.69, df = NA, p-value = 1e-04
+
+
+
+
+
+# Estrazione e pulizia di TUTTI i residui di Pearson
+residui_completi <- as.data.frame(test_chi$residuals) %>%
+  rownames_to_column(var = "Specie") %>%
+  rename(Residuo_Integra = integra, Residuo_Tagliata = tagliata)
+
+# Seleziono le specie chiave che deviano di più (Residuo assoluto > 1.5) per la tabella e il grafico
+specie_chiave <- residui_completi %>%
+  filter(abs(Residuo_Integra) >= 1.5 | abs(Residuo_Tagliata) >= 1.5) %>%
+  arrange(desc(Residuo_Integra))
+
+# CREAZIONE TABELLA PER WORD (Flextable)
+tabella_chi_word <- flextable(specie_chiave) %>%
   set_header_labels(
-    Analisi        = "Componente della Comunità",
-    V_stat         = "Statistica V",
-    Median         = "Pseudomediana della Differenza",
-    IC_95          = "I.C. 95% della Differenza",
-    p_value_pulito = "p-value",
-    Signif         = "Signif."
+    Specie           = "Specie di Uccello",
+    Residuo_Integra  = "Residuo Sponda Integra",
+    Residuo_Tagliata = "Residuo Sponda Tagliata"
   ) %>%
-  # Formattazione decimale scientifica italiana
-  colformat_double(j = "Median", digits = 1, decimal.mark = ",") %>%
-  colformat_int(j = "V_stat") %>%
-  # Stile 
+  colformat_double(j = c("Residuo_Integra", "Residuo_Tagliata"), digits = 3, decimal.mark = ",", big.mark = "") %>%
   theme_booktabs() %>%
   autofit() %>%
   bold(part = "header") %>%
-  # Metto in grassetto i nomi delle righe significativi
-  bold(j = "Analisi", part = "body") %>%
-  # Risolvo i conflitti di allineamento con il pacchetto terra
+  # Colora in rosso i residui fortemente significativi (> 2 o < -2)
+  color(i = ~ Residuo_Integra > 2 | Residuo_Integra < -2, j = "Residuo_Integra", color = "firebrick", part = "body") %>%
+  color(i = ~ Residuo_Tagliata > 2 | Residuo_Tagliata < -2, j = "Residuo_Tagliata", color = "firebrick", part = "body") %>%
   flextable::align(align = "center", part = "all") %>%
-  flextable::align(j = "Analisi", align = "left", part = "all")
+  flextable::align(j = "Specie", align = "left", part = "all")
+
+# Salvo Tabella in Word
+save_as_docx(tabella_chi_word, path = "C:/RTesi/Tabella_Residui_ChiQuadro.docx")
 
 
-# =====================================================================
-# ESPORTAZIONE NEL FILE WORD
-# =====================================================================
+# CREAZIONE GRAFICO A BARRE DIVERGENTI (Residui sulla Sponda Integra)
+# Mostrare solo la colonda di una sponda basta, perché l'altra è perfettamente speculare.
+# Un valore positivo significa "legato all'integra", un valore negativo significa "legato al taglio".
+grafico_chi_residui <- ggplot(specie_chiave, aes(x = reorder(Specie, Residuo_Integra), y = Residuo_Integra, fill = Residuo_Integra > 0)) +
+  geom_bar(stat = "identity", color = "black", width = 0.6, alpha = 0.85, linewidth = 0.4) +
+  coord_flip() + # Ruota il grafico per leggere i nomi delle specie in orizzontale
+  scale_fill_manual(values = c("TRUE" = "#66c2a5", "FALSE" = "#fc8d62"),
+                    labels = c("TRUE" = "Favorevole a Sponda Integra", "FALSE" = "Favorevole a Sponda Tagliata")) +
+  # Linee di soglia critica a +2 e -2 (Significatività statistica dei residui)
+  geom_hline(yintercept = c(-2, 2), linetype = "dashed", color = "firebrick", linewidth = 0.6) +
+  geom_hline(yintercept = 0, color = "gray40", linewidth = 0.5) +
+  labs(
+    title = "Residui Standardizzati di Pearson (Struttura della Comunità)",
+    subtitle = "Specie guida della differenziazione tra le sponde (T3 - 2025)",
+    x = "Specie di Uccello",
+    y = "Valore del Residuo di Pearson",
+    fill = "Preferenza di Habitat",
+    caption = "Le linee tratteggiate rosse indicano le soglie critiche di significatività (|Residuo| > 2)."
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, color = "gray30", hjust = 0.5),
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(t = 10, r = 15, b = 15, l = 10, unit = "pt")
+  )
 
-doc_wilcox <- read_docx()
+# Mostra e salva il grafico con altezza protetta per evitare tagli del testo
+print(grafico_chi_residui)
+ggsave("C:/RTesi/grafico_residui_chi_quadro.png", plot = grafico_chi_residui, width = 8.5, height = 7, dpi = 300)
+print("--- ANALISI CHI-QUADRO COMPLETATA CON SUCCESSO ---")
 
-# Titolo
-titolo_tabella <- "Tabella X. Risultati del test non parametrico appaiato di Wilcoxon per il confronto micro-locale della ricchezza d'aula tra sponde integre e sponde tagliate all'interno del medesimo segmento fluviale (Tratto Tagli, Anno 2025)."
-doc_wilcox <- body_add_par(doc_wilcox, titolo_tabella, style = "Normal")
 
-# Inserimento flextable
-doc_wilcox <- body_add_flextable(doc_wilcox, value = ft_wilcox)
 
-# Salvataggio del file nella cartella di lavoro
-print(doc_wilcox, target = "C:/RTesi/tabella_wilcoxon_sponde_2025.docx")
 
-print("--- TABELLA WORD DI WILCOXON GENERATA CON SUCCESSO ---")
+
+
+
+
+
+
+
+
+
+# ==============================================================================
+# ---- ANALISI SIMPER (Quali specie creano la differenza?) ----
+# ==============================================================================
+# Obiettivo: Creare una matrice multivariata dove ogni "Sito" è la combinazione 
+# tra il Segmento e la Sponda (es. "T3_02T_2025_integra").
+
+# Prepariamo la matrice comunitaria
+dati_simper <- specie |>
+  filter(SPONDA %in% c("integra", "tagliata")) |> 
+  # Creiamo un ID univoco per il "Sub-sito" (Segmento + Sponda)
+  mutate(SITO_SPONDA = paste(ID_SEGMENTO, SPONDA, sep = "_")) %>%
+  group_by(SITO_SPONDA, SPECIE) %>%
+  summarise(CONTEGGIO = sum(CONTEGGIO), .groups = "drop") %>%
+  pivot_wider(names_from = SPECIE, values_from = CONTEGGIO, values_fill = 0) %>%
+  column_to_rownames("SITO_SPONDA")
+
+# Prepariamo il vettore dei gruppi (integra/tagliata) 
+# IMPORTANTE: L'ordine deve coincidere esattamente con le righe della matrice
+vettore_sponde <- str_extract(rownames(dati_simper), "integra|tagliata")
+
+# Lanciamo la SIMPER
+# Permutations = 999 calcola anche la significatività statistica del contributo 
+# di ogni singola specie alla differenza complessiva
+risultato_simper <- simper(dati_simper, group = vettore_sponde, permutations = 999)
+
+print("--- RISULTATO SIMPER ---")
+# Summary mostra le specie ordinate per contributo (chi spiega più differenza sta in alto)
+summary(risultato_simper)
+
+# ava e avb: Sono le abbondanze medie della specie nei due gruppi
+# ava = integra e avb = tagliata (R le mette in ordine alfabetico, i prima di t)
+# average: è il "peso" (il contributo assoluto) che quella specie ha nel creare la differenza totale tra le due sponde
+# Più è alto, più la specie è responsabile del cambiamento
+# cumsum (Cumulative Sum): ti dice quanta parte della differenza totale tra le due sponde è spiegata accumulando le specie riga per riga.
+# p-value (p): ti dice se il contributo di quella specie alla differenza tra i due habitat è statisticamente significativo (se ***, significa che il pattern non è casuale)
+
+
