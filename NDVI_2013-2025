@@ -8,6 +8,9 @@ library(emmeans)
 library(flextable)
 library(officer)
 
+## ---- load data ----
+setwd("C:/RTesi")
+
 # PREPARAZIONE DEL DATASET 
 dati_confronto <- segmenti %>%
   filter(NOME_TRATTO %in% c("Monte", "Valle")) %>%
