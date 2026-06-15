@@ -30,6 +30,8 @@
   library(emmeans) # per i confronti post-hoc dei GLM
   library(dplyr)
   library(flextable)
+  library(dplyr)
+  library(officer)
   library(patchwork)
   library(nlme)
   library(ggdist)
@@ -259,61 +261,70 @@ Response: Shannon_H
 # NOME_TRATTO 0.0868    2  0.6147    0.5435    
 # NDVI        0.0001    1  0.0007    0.9783    
 # Residuals   5.2236   74              
-  
+
+
+
+ ==============================================================================
+# COSTRUZIONE TABELLA ANCOVA SHANNON DI TIPO III
 # ==============================================================================
-# COSTRUZIONE TABELLA ANCOVA SHANNON
 # ==============================================================================
+# COSTRUZIONE TABELLA ANCOVA SHANNON DI TIPO III (CORRETTO SENZA COPIARE TESTO EXTRA)
+# ==============================================================================
+library(car)
+library(dplyr)
+library(flextable)
+library(officer)
 
-# Estrazione automatica dei dati dal tuo oggetto anova_H
-summary_aov <- summary(anova_H)[[1]]
+# 1. Salvo l'output del test di Tipo III in un oggetto tabella
+ancova_tipo3 <- Anova(modello_H_lineare, type = "III")
 
-dati_tabella_h <- tibble(
-  Sorgente = c("Tratto (Monte vs Tagli vs Valle)", "NDVI (Covariata)"),
-  Df       = c(summary_aov["NOME_TRATTO", "Df"], summary_aov["NDVI", "Df"]),
-  SS       = c(summary_aov["NOME_TRATTO", "Sum Sq"], summary_aov["NDVI", "Sum Sq"]),
-  MS       = c(summary_aov["NOME_TRATTO", "Mean Sq"], summary_aov["NDVI", "Mean Sq"]),
-  F_val    = c(summary_aov["NOME_TRATTO", "F value"], summary_aov["NDVI", "F value"]),
-  p_val    = c(summary_aov["NOME_TRATTO", "Pr(>F)"], summary_aov["NDVI", "Pr(>F)"])
-)
+# 2. Trasformo l'oggetto in un dataframe pulito includendo i Residui
+dati_tabella_h <- as.data.frame(ancova_tipo3) %>%
+  rownames_to_column(var = "Sorgente") %>%
+  mutate(Sorgente = case_when(
+    Sorgente == "(Intercept)" ~ "Intercetta",
+    Sorgente == "NOME_TRATTO" ~ "Tratto (Monte vs Tagli vs Valle)",
+    Sorgente == "NDVI"        ~ "NDVI (Covariata)",
+    Sorgente == "Residuals"   ~ "Residui",
+    TRUE ~ Sorgente
+  )) %>%
+  # Calcolo il Quadrato Medio (MS) che manca nell'output di Anova()
+  mutate(MS = `Sum Sq` / Df) %>%
+  # Riordino le colonne per il layout classico
+  select(Sorgente, Df, SS = `Sum Sq`, MS, F_val = `F value`, p_val = `Pr(>F)`)
 
-# Costruzione della flextable con la formattazione richiesta
+# 3. Costruzione della flextable con funzioni native aggiornate
 tabella_h <- flextable(dati_tabella_h) %>%
   set_header_labels(
     Sorgente = "Sorgente di Variazione",
-    Df       = "Gradi Libertà (Df)",
+    Df       = "g.l. (Df)",
     SS       = "Somma Quadrati (SS)",
     MS       = "Quadrato Medio (MS)",
     F_val    = "Valore F",
     p_val    = "p-value"
   ) %>%
-  # Arrotondamento e virgola decimale per il testo in italiano
-  colformat_double(j = c("SS", "MS", "F_val"), digits = 3, decimal.mark = ",", big.mark = "") %>%
-  colformat_double(j = "p_val", digits = 4, decimal.mark = ",", big.mark = "") %>%
+  # Formattazione per le colonne dei calcoli statistici
+  colformat_double(j = c("SS", "MS", "F_val"), digits = 3, decimal.mark = ",", big.mark = "", na_str = "") %>%
   colformat_int(j = "Df", big.mark = "") %>%
+  # Formattazione nativa dei p-value: arrotonda a 4 decimali e gestisce gli NA dei residui
+  colformat_double(j = "p_val", digits = 4, decimal.mark = ",", big.mark = "", na_str = "") %>%
   theme_booktabs() %>%
   autofit() %>%
   bold(part = "header") %>%
   flextable::align(align = "center", part = "all") %>%
   flextable::align(j = "Sorgente", align = "left", part = "all")
 
-# Creo il documento Word
+# 4. Creo il documento Word e salvo
 doc_tabella_h <- read_docx()
-
-# Titolo della tabella e
 doc_tabella_h <- body_add_par(
   doc_tabella_h, 
-  "Tabella h - Analisi della Covarianza (ANCOVA) per l'indice di Diversità di Shannon (H') della comunità ornitica (Anno 2025).", 
+  "Tabella h - Analisi della Covarianza (ANCOVA) di Tipo III per l'indice di Diversità di Shannon (H') della comunità ornitica (Anno 2025).", 
   style = "Normal"
 )
-
-# Inserimento tabella
 doc_tabella_h <- body_add_flextable(doc_tabella_h, value = tabella_h)
 
-# Salvataggio
 print(doc_tabella_h, target = "C:/RTesi/Tabella_h_ANCOVA_Shannon_Reale.docx")
-print("--- TABELLA h REALE GENERATA IN WORD ---")
-
-
+print("--- TABELLA h REALE DI TIPO III GENERATA IN WORD CON SUCCESSO ---")
 
   # ==============================================================================
   # ANOVA sull'Indice di EveNness includendo l'NDVI come covariata (ANCOVA)
