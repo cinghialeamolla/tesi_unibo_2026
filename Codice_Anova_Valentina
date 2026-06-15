@@ -234,21 +234,31 @@ anova_S
 # ANOVA sull'Indice di Shannon includendo l'NDVI come covariata (ANCOVA)
 # ==============================================================================
 
-  anova_H <- aov(Shannon_H ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
-  anova_H
+ 
+  # Imposta i contrasti ortogonali (obbligatori per il Tipo III)
+  options(contrasts = c("contr.sum", "contr.poly"))
+
+   modello_H_lineare <- lm(Shannon_H ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
   
   shapiro.test(residuals(anova_H)) # p-value = 0.0963, è superiore a 0,05, i residui sono normali
   
   levene_H <- leveneTest(Shannon_H ~ NOME_TRATTO, data = dataset_analisi_1)
   print(levene_H) # p-value=  0.3517 > p-vaue 0,05; le varianze sono omogenee
 
-  print("--- RISULTATI ANCOVA SHANNON (H') CON NDVI ---")
-  print(summary(anova_H))
- # OUTPUT
- #              Df   Sum Sq   Mean Sq   F value   Pr(>F)
- # NOME_TRATTO  2    0.155   0.07737     1.096    0.340
- # NDVI         1    0.000   0.00005     0.001    0.978
- # Residuals   74    5.224   0.07059  
+# Calcolo la tabella ANCOVA di Tipo III
+print("--- RISULTATI ANCOVA SHANNON (TIPO III) ---")
+Anova(modello_H_lineare, type = "III")
+
+# Ripristina i contrasti di default di R per evitare problemi con altri pacchetti
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+# OUTPUT
+Response: Shannon_H
+#            Sum Sq   Df F value    Pr(>F)    
+# (Intercept) 4.4848    1 63.5342 1.471e-11 ***
+# NOME_TRATTO 0.0868    2  0.6147    0.5435    
+# NDVI        0.0001    1  0.0007    0.9783    
+# Residuals   5.2236   74              
   
 # ==============================================================================
 # COSTRUZIONE TABELLA ANCOVA SHANNON
