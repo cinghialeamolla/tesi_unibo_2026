@@ -362,10 +362,15 @@ plot(medie_storiche) +
 
 ## ---- analisi turnover con Jaccard ----
 # Calcoliamo gli elementi base per l'Indice di Jaccard
-specie_2013 <- unique(specie_2013$SPECIE)
+specie_2013 <- unique(dati_agg_2013$SPECIE)
 # Errore: oggetto 'specie_2013' non trovato
-specie_2025 <- unique(specie_2025$SPECIE)
+
+specie_2025 <- unique(dati_agg_2025$SPECIE)
 Errore in specie_2025$SPECIE : $ operator is invalid for atomic vectors
+
+
+
+
 
 comuni <- intersect(specie_2013, specie_2025)
 perse  <- setdiff(specie_2013, specie_2025)    # Presenti nel 2013, non nel 2025
@@ -401,132 +406,5 @@ tab_finale
 
 
 
-# Isolo i segmenti storici speculari (Monte e Valle) per entrambi gli anni
-# Escludmo il tratto Tagli (T3) per non inquinare il confronto temporale
-tratti_storici <- c("Monte", "Valle")
-
-seg_singoli_storici <- segmenti %>%
-  filter(NOME_TRATTO %in% tratti_storici) %>%
-  mutate(ANNO = factor(ANNO, levels = c("2013", "2025")))
-
-# Estraggo i contatti biologici aggregandoli per intero segmento
-specie_singoli_storici <- specie %>%
-  filter(ID_SEGMENTO %in% seg_singoli_storici$ID_SEGMENTO) %>%
-  group_by(ID_SEGMENTO, SPECIE) %>%
-  summarise(CONTEGGIO_TOT = sum(CONTEGGIO), .groups = "drop")
-
-# Creo la matrice "Siti x Specie" per calcolare la ricchezza di ogni segmento
-matrice_s_storica <- specie_singoli_storici %>%
-  pivot_wider(names_from = SPECIE, values_from = CONTEGGIO_TOT, values_fill = 0) %>%
-  column_to_rownames("ID_SEGMENTO")
-
-df_ricchezza_singoli <- tibble(
-  ID_SEGMENTO = rownames(matrice_s_storica),
-  Ricchezza_S = vegan::specnumber(matrice_s_storica)
-)
-
-# Unisco i dati per ottenere il dataset finale con le repliche spaziali
-dataset_segmenti_glm <- seg_singoli_storici %>%
-  left_join(df_ricchezza_singoli, by = "ID_SEGMENTO") %>%
-  mutate(Ricchezza_S = replace_na(Ricchezza_S, 0))
-
-# =====================================================================
-# ---- SPERIMENTAZIONE MODELLO POISSON E VERIFICA DISPERSIONE ----
-# =====================================================================
-
-# Lancio il modello Poisson sulle REPLICHE con l'offset per la lunghezza del segmento
-glm_reale_poisson <- glm(
-  Ricchezza_S ~ NOME_TRATTO * ANNO, 
-  family = poisson(link = "log"), 
-  offset = log(LUNGHEZZA_m), 
-  data = dataset_segmenti_glm
-)
-
-# STRAZIONE DIRETTA E AUTOMATICA DELLA DISPERSIONE
-# Calcoliamo matematicamente: Residual Deviance / Residual Df
-dev_residua <- glm_reale_poisson$deviance
-gl_residui   <- glm_reale_poisson$df.residual
-ratio_reale  <- dev_residua / gl_residui
-
-cat("\n=========================================================\n")
-cat("--> RESIDUAL DEVIANCE DEL MODELLO:", round(dev_residua, 4), "\n")
-cat("--> GRADI DI LIBERTÀ RESIDUI (Df):", gl_residui, "\n")
-cat("--> VERO RATIO DI DISPERSIONE CALCOLATO:", round(ratio_reale, 4), "\n")
-cat("=========================================================\n\n")
-
-# 7. Stampiamo a schermo il summary per visualizzare i parametri
-print("--- SUMMARY COMPLETO DEL MODELLO (DATI CORRETTI) ---")
-summary(glm_reale_poisson)
 
 
-
-# =====================================================================
-# CALCOLO TURNOVER DI JACCARD STORICO INTEGRATO (RISOLTO)
-# =====================================================================
-
-# Isolo i segmenti speculari (Monte e Valle) per i due anni
-tratti_confronto <- c("Monte", "Valle")
-seg_2013_j <- segmenti %>% filter(ANNO == 2013 & NOME_TRATTO %in% tratti_confronto)
-seg_2025_j <- segmenti %>% filter(ANNO == 2025 & NOME_TRATTO %in% tratti_confronto)
-
-# Estraggo i vettori puliti e unici delle specie (Pool totali T1 + T2)
-lista_specie_2013 <- specie %>%
-  filter(ID_SEGMENTO %in% seg_2013_j$ID_SEGMENTO) %>%
-  distinct(SPECIE) %>%
-  pull(SPECIE)
-
-lista_specie_2025 <- specie %>%
-  filter(ID_SEGMENTO %in% seg_2025_j$ID_SEGMENTO) %>%
-  distinct(SPECIE) %>%
-  pull(SPECIE)
-
-# Calcolo le metriche di Jaccard e delle dinamiche di turnover
-comuni <- intersect(lista_specie_2013, lista_specie_2025)
-perse  <- setdiff(lista_specie_2013, lista_specie_2025) # Scomparse nel 2025
-nuove  <- setdiff(lista_specie_2025, lista_specie_2013) # Ingressi nel 2025
-
-jaccard_sim <- length(comuni) / length(union(lista_specie_2013, lista_specie_2025))
-turnover    <- 1 - jaccard_sim
-
-# Creazione iniziale del dataframe con i valori grezzi numerici
-tabella_jaccard_raw <- data.frame(
-  Metrica = c("Similarità di Jaccard", 
-              "Turnover (Dissimilarità di Jaccard)", 
-              "Pool Specie Totali (2013)", 
-              "Pool Specie Totali (2025)", 
-              "Specie storiche non più rilevate (Perse)", 
-              "Nuove specie registrate (Acquisite)"),
-  Valore_Num = c(jaccard_sim, turnover, length(lista_specie_2013), length(lista_specie_2025), length(perse), length(nuove))
-)
-
-# CONVERSIONE IN TESTO: Risolve il bug degli zeri decimali (es. 36.000)
-tabella_jaccard_fissa <- tabella_jaccard_raw %>%
-  mutate(Valore = case_when(
-    Metrica %in% c("Similarità di Jaccard", "Turnover (Dissimilarità di Jaccard)") ~ format(round(Valore_Num, 3), decimal.mark = ","),
-    TRUE ~ as.character(as.integer(Valore_Num))
-  )) %>%
-  select(Metrica, Valore)
-
-# Formattazione accademica con flextable
-tab_finale <- flextable(tabella_jaccard_fissa) %>%
-  set_header_labels(Metrica = "Parametro Ecologico Comunitario (T1 + T2)", Valore = "Valore") %>%
-  theme_vanilla() %>%
-  bold(part = "header") %>%
-  autofit() %>%
-  flextable::align(align = "center", part = "all") %>%
-  flextable::align(j = "Metrica", align = "left", part = "all")
-
-# Mostra la tabella a schermo per verifica visiva
-print(tab_finale)
-
-# Salvo nel file Word
-doc_jaccard_pool <- read_docx()
-doc_jaccard_pool <- body_add_par(
-  doc_jaccard_pool, 
-  "Tabella 19 - Sintesi delle metriche di biodiversità beta e turnover temporale di Jaccard per la comunità ornitica nidificante del Fiume Ombrone (Confronto globale dei tratti storici omogenei Monte e Valle, 2013 vs 2025).", 
-  style = "Normal"
-)
-doc_jaccard_pool <- body_add_flextable(doc_jaccard_pool, value = tab_finale)
-print(doc_jaccard_pool, target = "C:/RTesi/Tabella_Jaccard_Sintesi_Storica.docx")
-
-print("--- TABELLA JACCARD CORRETTA E SALVATA IN WORD ---")
