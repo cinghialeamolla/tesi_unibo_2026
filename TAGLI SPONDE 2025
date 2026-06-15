@@ -150,6 +150,7 @@ ggsave("C:/RTesi/grafico_sponde_appaiate_T3.png", plot = grafico_sponde_appaiate
 print("--- GRAFICO RIGENERATO CON CAPTION COMPLETA ---")
 
 
+
 ###====================================================================
 ## ---- chi-quadro: la struttura della comunità (chi c'è e in che proporzione) è cambiata a causa del taglio? ----
 ###====================================================================
@@ -187,9 +188,6 @@ print(test_chi)
 # Pearson's Chi-squared test with simulated p-value (based on 9999 replicates)
 # data:  tabella_chi_pulita
 # X-squared = 119.69, df = NA, p-value = 1e-04
-
-
-
 
 
 # Estrazione e pulizia di TUTTI i residui di Pearson
@@ -258,16 +256,6 @@ print("--- ANALISI CHI-QUADRO COMPLETATA CON SUCCESSO ---")
 
 
 
-
-
-
-
-
-
-
-
-
-
 # ==============================================================================
 # ---- ANALISI SIMPER (Quali specie creano la differenza?) ----
 # ==============================================================================
@@ -305,3 +293,47 @@ summary(risultato_simper)
 # p-value (p): ti dice se il contributo di quella specie alla differenza tra i due habitat è statisticamente significativo (se ***, significa che il pattern non è casuale)
 
 
+# =====================================================================
+# ---- ESTRAZIONE E GENERAZIONE TABELLA SIMPER SPONDE T3 ----
+# =====================================================================
+
+# Trasformo l'output SIMPER in un dataframe pulito
+df_simper_sponde <- as.data.frame(risultato_simper$integra_tagliata) %>%
+  rownames_to_column(var = "Specie") %>%
+  # Seleziono solo le prime 7 specie (spiegano il 61% del turnover totale)
+  slice_head(n = 7) %>%
+  select(Specie, average, ava, avb, cumsum, p) %>%
+  mutate(
+    Contrib_Percentuale = (average / sum(risultato_simper$integra_tagliata$average)) * 100,
+    Cumul_Percentuale   = cumsum * 100
+  ) %>%
+  select(Specie, ava, avb, Contrib_Percentuale, Cumul_Percentuale, p)
+
+# Creo della Flextable formattata per l'italiano
+tabella_simper_sponde <- flextable(df_simper_sponde) %>%
+  set_header_labels(
+    Specie            = "Specie di Uccello",
+    ava               = "Abbondanza Media Integra",
+    avb               = "Abbondanza Media Tagliata",
+    Contrib_Percentuale = "Contributo Singolo (%)",
+    Cumul_Percentuale = "Contributo Cumulativo (%)",
+    p                 = "p-value"
+  ) %>%
+  # Formattazione numerica accademica
+  colformat_double(j = c("ava", "avb", "Contrib_Percentuale", "Cumul_Percentuale"), digits = 2, decimal.mark = ",", big.mark = "") %>%
+  colformat_double(j = "p", digits = 3, decimal.mark = ",", big.mark = "") %>%
+  # Sostituzione formale dei p-value significativi
+  labelizor(j = "p", labels = c("0,001" = "< 0,001 ***"), part = "body") %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  bold(part = "header") %>%
+  flextable::align(align = "center", part = "all") %>%
+  flextable::align(j = "Specie", align = "left", part = "all")
+
+# Esportazione in Word
+doc_simper_sp <- read_docx()
+doc_simper_sp <- body_add_par(doc_simper_sp, "Tabella 20 - Analisi SIMPER disaggregata per sponda nel tratto T3 (Anno 2025): specie responsabili della dissomiglianza strutturale (soglia cumulativa > 60%). ava = Sponda Integra, avb = Sponda Tagliata.", style = "Normal")
+doc_simper_sp <- body_add_flextable(doc_simper_sp, value = tabella_simper_sponde)
+
+save_as_docx(tabella_simper_sponde, path = "C:/RTesi/tabella_simper_sponde_T3.docx")
+print("--- TABELLA SIMPER SPONDE GENERATA CON SUCCESSO ---")
