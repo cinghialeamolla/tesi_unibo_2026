@@ -793,52 +793,69 @@ print("Grafico a barre classico salvato correttamente!")
   
   # Eseguo la PCoA (MDS metrico)
   pcoa_risultato <- cmdscale(dist_bray, k = 2, eig = TRUE)
+
+ # Isolo solo gli autovalori positivi (> 0)
+ # Evita la sovrastima artificiale della varianza spiegata legata a distanze non-euclidee
+ autovalori_positivi <- pcoa_risultato$eig[pcoa_risultato$eig > 0]
+
+ # Calcolo la percentuale di varianza spiegata dai primi due assi
+ var_spiegata <- round(100 * pcoa_risultato$eig / sum(autovalori_positivi), 1)
+ asse1_var <- var_spiegata[1]
+ asse2_var <- var_spiegata[2]
+
+ # Estraggo le coordinate dei siti per il grafico
+ punti_pcoa <- as.data.frame(pcoa_risultato$points)
+ colnames(punti_pcoa) <- c("PCoA1", "PCoA2")
+ punti_pcoa$ID_SEGMENTO <- rownames(punti_pcoa)
   
-  # Calcolo la percentuale di varianza spiegata dai primi due assi
-  var_spiegata <- round(100 * pcoa_risultato$eig / sum(pcoa_risultato$eig), 1)
-  asse1_var <- var_spiegata[1]
-  asse2_var <- var_spiegata[2]
-  
-  # Estraggo le coordinate dei siti per il grafico
-  punti_pcoa <- as.data.frame(pcoa_risultato$points)
-  colnames(punti_pcoa) <- c("PCoA1", "PCoA2")
-  punti_pcoa$ID_SEGMENTO <- rownames(punti_pcoa)
-  
-  # UniSCo i metadati dei tratti
+  # Unisco i metadati dei tratti
   punti_grafico_pcoa <- punti_pcoa %>%
-    left_join(metadati_permanova, by = "ID_SEGMENTO")
-  
+  left_join(metadati_permanova, by = "ID_SEGMENTO") %>%
+  mutate(NOME_TRATTO = factor(NOME_TRATTO, levels = c("Monte", "Tagli", "Valle")))
+
+
+  # Palette cromatica ad alta leggibilità
+  scale_color_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
+  scale_fill_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
+  labs(
+
+
+
+
+
+
   # GRAFICO PCoA CON ELLISSI DI CONFIDENZA
-  grafico_pcoa <- ggplot(punti_grafico_pcoa, aes(x = PCoA1, y = PCoA2, color = NOME_TRATTO, fill = NOME_TRATTO)) +
-    # Ellissi che racchiudono il 95% della distribuzione dei segmenti di ogni tratto
-    stat_ellipse(geom = "polygon", alpha = 0.1, linewidth = 0.5, linetype = "dashed") +
-    # Punti dei segmenti campionati
-    geom_point(size = 3.5, alpha = 0.85, shape = 21, color = "black") +
-    # Palette cromatica ad alta leggibilità
-    scale_color_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
-    scale_fill_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
-    labs(
-      title = "Ordinamento Multivariato della Comunità Ornitica (2025)",
-      subtitle = "Principal Coordinates Analysis (PCoA) su matrice Bray-Curtis",
-      x = paste0("PCoA 1 (", asse1_var, "% Varianza Spiegata)"),
-      y = paste0("PCoA 2 (", asse2_var, "% Varianza Spiegata)"),
-      color = "Tratto di Fiume",
-      fill = "Tratto di Fiume"
-    ) +
-    theme_classic(base_size = 14) +
-    theme(
-      plot.title = element_text(face = "bold"),
-      legend.position = "bottom"
-    )
-  
-  # Mostra il grafico a schermo
-  print(grafico_pcoa)
-  
-  
-  # Salva l'immagine in alta definizione (300 DPI) per la tesi
-  ggsave("C:/RTesi/grafico_pcoa_comunita.png", plot = grafico_pcoa, width = 7.5, height = 6, dpi = 300)
-  
-  
+ grafico_pcoa <- ggplot(punti_grafico_pcoa, aes(x = PCoA1, y = PCoA2, color = NOME_TRATTO, fill = NOME_TRATTO)) +
+  # Ellissi che racchiudono il 95% della distribuzione (usiamo stat_ellipse standard)
+  stat_ellipse(geom = "polygon", alpha = 0.1, linewidth = 0.5, linetype = "dashed", level = 0.95) +
+  # Punti dei segmenti campionati
+  geom_point(size = 3.5, alpha = 0.85, shape = 21, color = "black") +
+  # Palette cromatica ad alta leggibilità
+  scale_color_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
+  scale_fill_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
+  labs(
+    title = "Ordinamento Multivariato della Comunità Ornitica (2025)",
+    subtitle = "Principal Coordinates Analysis (PCoA) su matrice Bray-Curtis",
+    x = paste0("PCoA 1 (", asse1_var, "% Varianza Spiegata)"),
+    y = paste0("PCoA 2 (", asse2_var, "% Varianza Spiegata)"),
+    color = "Tratto di Fiume",
+    fill = "Tratto di Fiume"
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, color = "gray30", hjust = 0.5),
+    legend.position = "bottom"
+  )
+
+# Mostra il grafico a schermo
+print(grafico_pcoa)
+
+# Salva l'immagine in alta definizione per la stampa della tesi
+ggsave("C:/RTesi/grafico_pcoa_comunita.png", plot = grafico_pcoa, width = 8, height = 6.5, dpi = 300)
+
+
+
   # =====================================================================
   # ---- CODICE RISOLUTIVO TABELLA PERMANOVA COMPLETA PER WORD ----
   # =====================================================================
@@ -1066,3 +1083,287 @@ grafico_barre <- ggplot(dataset_specialisti, aes(x = NOME_TRATTO, y = S_Speciali
   )
 
 ggsave(filename = "C:/RTesi/Grafico_Specialisti_2025.png", plot = grafico_barre, width = 7, height = 6.2, dpi = 300)
+
+
+
+# =====================================================================
+# ---- ANALISI SIMPER (IDENTIFICAZIONE DELLE SPECIE CHIAVE) ----
+# =====================================================================
+
+# 1. Esecuzione della SIMPER sulla matrice trasformata (coerente con PCoA)
+# Usiamo sqrt(matrice_comunita) per non far schiacciare i risultati dalle specie iper-abbondanti
+simper_risultato <- simper(sqrt(matrice_comunita), group = metadati_permanova$NOME_TRATTO, permutations = 999)
+
+# Trasformiamo l'output in un riassunto leggibile
+summary_simper <- summary(simper_risultato)
+
+# 2. Estrazione automatica delle TOP 5 specie responsabili per ogni confronto
+tabella_simper_dati <- tibble()
+nomi_confronti <- names(summary_simper)
+
+for (confronto in nomi_confronti) {
+  df_comp <- as.data.frame(summary_simper[[confronto]]) %>%
+    rownames_to_column(var = "Specie") %>%
+    # Calcoliamo il contributo percentuale singolo e cumulativo
+    mutate(
+      Contrib_Percentuale = (average / sum(average)) * 100,
+      Cumul_Percentuale   = cumsum(Contrib_Percentuale),
+      Confronto_Tratti     = confronto
+    ) %>%
+    # Isoliamo le prime 5 specie con il contributo più alto
+    slice_head(n = 5) %>%
+    select(Confronto_Tratti, Specie, Contrib_Percentuale, Cumul_Percentuale)
+  
+  tabella_simper_dati <- bind_rows(tabella_simper_dati, df_comp)
+}
+
+# 3. Formattazione estetica della tabella con flextable per la tesi italiana
+tabella_simper_word <- flextable(tabella_simper_dati) %>%
+  set_header_labels(
+    Confronto_Tratti    = "Confronto a Coppie",
+    Specie              = "Specie di Uccello",
+    Contrib_Percentuale = "Contributo Singolo (%)",
+    Cumul_Percentuale   = "Contributo Cumulativo (%)"
+  ) %>%
+  # Unisce verticalmente le celle con lo stesso nome di confronto per non ripetere il testo
+  merge_v(j = "Confronto_Tratti") %>%
+  # Converte il punto in virgola ed evita warning di sistema
+  colformat_double(j = c("Contrib_Percentuale", "Cumul_Percentuale"), digits = 2, decimal.mark = ",", big.mark = "") %>%
+  # Applica lo stile accademico Booktabs
+  theme_booktabs() %>%
+  autofit() %>%
+  bold(part = "header") %>%
+  flextable::align(align = "center", part = "all") %>%
+  flextable::align(j = c("Confronto_Tratti", "Specie"), align = "left", part = "all") %>%
+  # Risolve eventuali sovrapposizioni grafiche nei bordi
+  fix_border_issues()
+
+# 4. Creazione ed esportazione del file Word
+doc_simper <- read_docx()
+doc_simper <- body_add_par(
+  doc_simper, 
+  "Tabella 11 - Risultati dell'analisi SIMPER: prime 5 specie di uccelli responsabili della dissomiglianza nella composizione della comunità tra i tratti monitorati (Anno 2025). Le abbondanze sono state precedentemente trasformate tramite radice quadrata.", 
+  style = "Normal"
+)
+doc_simper <- body_add_flextable(doc_simper, value = tabella_simper_word)
+
+print(doc_simper, target = "C:/RTesi/Tabella_11_SIMPER_2025.docx")
+print("--- TABELLA SIMPER GENERATA CON SUCCESSO IN WORD ---")
+
+
+# =====================================================================
+# ---- GLM SULLE GUILDS: NIDIFICANTI RURALI (RURAL NESTERS) ----
+# =====================================================================
+
+
+# Estraggo e calcolo la ricchezza per i Rural Nesters
+specie_rurali <- specie %>%
+  filter(ID_SEGMENTO %in% seg_2025$ID_SEGMENTO, 
+         str_squish(GUILD) == "rural nesters") %>% 
+  group_by(ID_SEGMENTO, SPECIE) %>%
+  summarise(CONTEGGIO_TOT = sum(CONTEGGIO), .groups = "drop")
+
+# Trasformazione in formato WIDE
+matrice_rurali <- specie_rurali %>%
+  pivot_wider(names_from = SPECIE, values_from = CONTEGGIO_TOT, values_fill = 0) %>%
+  column_to_rownames("ID_SEGMENTO")
+
+# Calcolo della ricchezza della gilda rurale
+indici_rurali <- tibble(
+  ID_SEGMENTO = rownames(matrice_rurali),
+  S_Rurali = vegan::specnumber(matrice_rurali)
+)
+
+# Unione con i metadati ambientali del 2025
+dataset_rurali <- seg_2025_corretto %>%
+  left_join(indici_rurali, by = "ID_SEGMENTO") %>%
+  mutate(S_Rurali = replace_na(S_Rurali, 0)) # Gestione zeri impliciti
+
+# Costruzione del modello di base (Poisson)
+glm_rurali_pois <- glm(S_Rurali ~ NOME_TRATTO + NDVI,
+                       family = poisson(link = "log"),
+                       data = dataset_rurali)
+
+# Controllo della dispersione
+ratio_disp_rur <- glm_rurali_pois$deviance / glm_rurali_pois$df.residual
+print(paste("--> RATIO DI DISPERSIONE RURALI:", round(ratio_disp_rur, 4)))
+
+# Selezione automatica del modello in base alla dispersione
+if (ratio_disp_rur > 1.3) {
+  glm_rurali_finale <- glm.nb(S_Rurali ~ NOME_TRATTO + NDVI, data = dataset_rurali)
+} else if (ratio_disp_rur < 0.7) {
+  glm_rurali_finale <- glm(S_Rurali ~ NOME_TRATTO + NDVI, family = quasipoisson(link = "log"), data = dataset_rurali)
+} else {
+  glm_rurali_finale <- glm_rurali_pois
+}
+
+summary(glm_rurali_finale)
+
+# Contrasti post-hoc con emmeans (usando i gradi di libertà reali = 74)
+gl_residui_rur <- glm_rurali_finale$df.residual
+medie_rurali_t <- emmeans(glm_rurali_finale, ~ NOME_TRATTO, type = "response", df = gl_residui_rur)
+contrasti_rur_t <- pairs(medie_rurali_t)
+print(contrasti_rur_t)
+
+# =====================================================================
+# ---- ESPORTAZIONE TABELLE IN WORD ----
+# =====================================================================
+
+# Tabella Modello
+coeff_rur <- summary(glm_rurali_finale)$coefficients
+df_modello_rur <- tibble(
+  Parametro  = c("Intercetta (Monte)", "Tratto: Tagli", "Tratto: Valle", "NDVI (Covariata)"),
+  Stima      = coeff_rur[, "Estimate"],
+  Err_Std    = coeff_rur[, "Std. Error"],
+  Statistica = coeff_rur[, 3], # t value o z value a seconda del modello
+  p_value    = coeff_rur[, 4]
+)
+
+tab_mod_rur_word <- flextable(df_modello_rur) %>%
+  set_header_labels(Parametro = "Parametro", Stima = "Stima (Coef.)", Err_Std = "Err. Std.", Statistica = "Statistica", p_value = "p-value") %>%
+  colformat_double(j = c("Stima", "Err_Std", "Statistica"), digits = 3, decimal.mark = ",", big.mark = "") %>%
+  colformat_double(j = "p_value", digits = 4, decimal.mark = ",", big.mark = "") %>%
+  theme_booktabs() %>% autofit() %>% bold(part = "header") %>%
+  flextable::align(align = "center", part = "all") %>% flextable::align(j = "Parametro", align = "left", part = "all")
+
+# Tabella Post-Hoc
+df_contrasti_rur <- as.data.frame(contrasti_rur_t)
+tab_cont_rur_word <- flextable(df_contrasti_rur) %>%
+  set_header_labels(contrast = "Confronto Tratti", ratio = "Rapporto Medie (Ratio)", SE = "Err. Std. (SE)", df = "g.l.", t.ratio = "Valore t", p.value = "p-value") %>%
+  colformat_double(j = c("ratio", "SE", "t.ratio"), digits = 3, decimal.mark = ",", big.mark = "") %>%
+  colformat_int(j = "df", big.mark = "") %>%
+  colformat_double(j = "p.value", digits = 4, decimal.mark = ",", big.mark = "") %>%
+  theme_booktabs() %>% autofit() %>% bold(part = "header") %>%
+  flextable::align(align = "center", part = "all") %>% flextable::align(j = "contrast", align = "left", part = "all")
+
+# Scrittura documento Word
+doc_rur <- read_docx()
+doc_rur <- body_add_par(doc_rur, "Tabella 16 - Risultati del GLM per la Ricchezza dei Nidificanti Rurali (Anno 2025).", style = "Normal")
+doc_rur <- body_add_flextable(doc_rur, value = tab_mod_rur_word)
+doc_rur <- body_add_par(doc_rur, "\n")
+doc_rur <- body_add_par(doc_rur, "Tabella 17 - Contrasti post-hoc di Tukey per la Ricchezza dei Nidificanti Rurali (Anno 2025).", style = "Normal")
+doc_rur <- body_add_flextable(doc_rur, value = tab_cont_rur_word)
+
+print(doc_rur, target = "C:/RTesi/Tabelle_Nidificanti_Rurali_2025.docx")
+print("--- TABELLE DEI NIDIFICANTI RURALI GENERATE CON SUCCESSO ---")
+
+# =====================================================================
+# ---- GRAFICO INTEGRATO: RICCHEZZA NIDIFICANTI RURALI (2025) ----
+# =====================================================================
+
+# Calcolo i valori medi e le deviazioni standard per il trend
+dati_medie_rur <- dataset_rurali %>%
+  group_by(NOME_TRATTO) %>%
+  summarise(
+    Media = mean(S_Rurali, na.rm = TRUE),
+    Dev_Std = sd(S_Rurali, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(NOME_TRATTO = factor(NOME_TRATTO, levels = c("Monte", "Tagli", "Valle")))
+
+# Forzo l'ordine geografico reale del fiume anche nel dataset principale
+dataset_rurali_grafico <- dataset_rurali %>%
+  mutate(NOME_TRATTO = factor(NOME_TRATTO, levels = c("Monte", "Tagli", "Valle")))
+
+# Costruisco il Grafico con ggplot2
+grafico_rurali <- ggplot() +
+  # Sfondo: Boxplot sfumati per mostrare i quartili e la variabilità interna
+  geom_boxplot(data = dataset_rurali_grafico, aes(x = NOME_TRATTO, y = S_Rurali, fill = NOME_TRATTO), 
+               alpha = 0.2, width = 0.4, color = "gray40", outlier.shape = NA) +
+  # Punti reali: Ogni punto rappresenta la ricchezza rurale in un singolo segmento (jittered per non sovrapporli)
+  geom_jitter(data = dataset_rurali_grafico, aes(x = NOME_TRATTO, y = S_Rurali, color = NOME_TRATTO),
+              width = 0.15, alpha = 0.5, size = 2) +
+  # Linea del Trend: Unisce le medie per mostrare visivamente l'incremento verso Valle
+  geom_line(data = dati_medie_rur, aes(x = NOME_TRATTO, y = Media, group = 1), 
+            color = "firebrick3", linewidth = 1, linetype = "dashed") +
+  # Barre di errore (Deviazione Standard) attorno alle medie
+  geom_errorbar(data = dati_medie_rur, aes(x = NOME_TRATTO, ymin = Media - Dev_Std, ymax = Media + Dev_Std), 
+                width = 0.08, color = "black", linewidth = 0.8) +
+  # Punti delle Medie: Grandi ed evidenziati sopra il resto
+  geom_point(data = dati_medie_rur, aes(x = NOME_TRATTO, y = Media, fill = NOME_TRATTO), 
+             size = 4, shape = 21, color = "black") +
+  
+   # Palette cromatica ad alta leggibilità
+  scale_color_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
+  scale_fill_manual(values = c("#2ca02c", "#d62728", "#1f77b4")) +
+  # Annotazione grafica del p-value significativo (Monte vs Valle)
+  annotate("path", x = c(1, 1, 3, 3), y = c(6, 6.2, 6.2, 6), color = "gray30", linewidth = 0.5) +
+  annotate("text", x = 2, y = 6.4, label = "p = 0,014 *", size = 4, fontface = "bold", color = "gray20") +
+  labs(
+    title = "Ricchezza della Gilda dei Nidificanti Rurali (2025)",
+    subtitle = "Andamento spaziale e risposte al gradiente fluviale dell'Ombrone",
+    x = "Tratto di Fiume (Ordinamento Da Monte a Foce)",
+    y = "Numero di Specie per Segmento (Ricchezza S)",
+    caption = "Le barre di errore indicano la Deviazione Standard (± SD). La linea tratteggiata unisce le medie."
+  ) +
+  # Impostazione assi discreti e limiti per dare respiro alle annotazioni
+ scale_y_continuous(limits = c(0, 8), breaks = 0:8) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, color = "gray30", hjust = 0.5),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank()
+  )
+
+# Mostra il grafico a schermo
+print(grafico_rurali)
+
+# Salvo l'immagine in altissima definizione per la stampa della tesi
+ggsave("C:/RTesi/grafico_ricchezza_rurali_2025.png", plot = grafico_rurali, width = 8, height = 6, dpi = 300)
+print("--- GRAFICO RURALI ESPORTATO IN PNG ---")
+
+
+# =====================================================================
+#  GRAFICO A BARRE OTTIMIZZATO PER I NIDIFICANTI RURALI (2025)
+# =====================================================================
+
+testo_caption_rur <- "Le barre rappresentano il numero medio di specie per segmento ± l'Intervallo di Confidenza (95% CI). Lettere diverse (a, b) indicano differenze statisticamente significative al test di Tukey (p < 0,05). Lettere condivise (ab) indicano assenza di differenze significative con entrambi i gruppi."
+
+# Calcolo il massimo valore reale per posizionare le lettere in modo sicuro sulla gilda rurale
+y_max_dati_rur <- max(dataset_rurali$S_Rurali, na.rm = TRUE)
+
+# Assicuriamoci che il fattore mantenga l'ordine geografico reale
+dataset_rurali_ordinato <- dataset_rurali %>%
+  mutate(NOME_TRATTO = factor(NOME_TRATTO, levels = c("Monte", "Tagli", "Valle")))
+
+grafico_barre_rurali <- ggplot(dataset_rurali_ordinato, aes(x = NOME_TRATTO, y = S_Rurali, fill = NOME_TRATTO)) +
+  # Disegno delle barre con le medie
+  stat_summary(fun = mean, geom = "bar", alpha = 0.8, width = 0.5, color = "black", linewidth = 0.4) +
+  # Disegno delle barre di errore basate sull'Intervallo di Confidenza al 95%
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.15, color = "black", linewidth = 0.8) +
+  
+  # POSIZIONAMENTO LETTERE POST-HOC (Corrette sulla base dell'output emmeans)
+  # Monte = a, Tagli = ab (intermedio), Valle = b (significativamente maggiore di Monte)
+  annotate("text", x = 1, y = y_max_dati_rur + 0.6, label = "a", size = 5.5, fontface = "bold", color = "black") +
+  annotate("text", x = 2, y = y_max_dati_rur + 0.6, label = "ab", size = 5.5, fontface = "bold", color = "gray40") +
+  annotate("text", x = 3, y = y_max_dati_rur + 0.6, label = "b", size = 5.5, fontface = "bold", color = "#1f77b4") +
+  
+  # Colore coerente con lo stile scelto (Palette pastello coordinata)
+  scale_fill_manual(values = c("Monte" = "#66c2a5", "Tagli" = "#fc8d62", "Valle" = "#8da0cb")) +
+  
+  # Espando l'asse Y per non tagliare le lettere fuori dal margine superiore
+  scale_y_continuous(limits = c(0, y_max_dati_rur + 1.2), breaks = 0:(y_max_dati_rur + 1)) +
+  
+  labs(
+    title = "Ricchezza di specie 'rurali' della fascia ripariale per tratto",
+    subtitle = "Guild: 'rural nesters' (GLM Quasipoisson: p = 0,005)",
+    x = "Tratto di fiume monitorato",
+    y = "N° Medio di specie per segmento",
+    caption = str_wrap(testo_caption_rur, width = 65)
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
+    plot.subtitle = element_text(face = "italic", size = 11, color = "dimgray", hjust = 0.5, margin = margin(b = 15)),
+    axis.text.x = element_text(size = 12, face = "bold", color = "black"),
+    axis.text.y = element_text(size = 11, color = "black"),
+    plot.caption = element_text(size = 9.5, face = "italic", color = "dimgray", hjust = 0, lineheight = 1.2, margin = margin(t = 12)),
+    legend.position = "none",
+    panel.grid.major.y = element_line(color = "gray95", linetype = "solid")
+  )
+
+# Salvo l'immagine nella cartella di lavoro della tesi
+ggsave(filename = "C:/RTesi/Grafico_Rurali_Barre_2025.png", plot = grafico_barre_rurali, width = 7, height = 6.2, dpi = 300)
+print("--- GRAFICO A BARRE PER I RURALI GENERATO E SALVATO CON SUCCESSO ---")
