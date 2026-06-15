@@ -154,9 +154,58 @@ Grafico_2025
 ggsave("grafico_transetti_2025.png", width = 8, height = 6, dpi = 300)
 
 
+# ========================================================================================
+# - Grafico a specchio abbondanze per i due anni: 2013 a sinistra (-) e 2025 a destra (+)
+# ========================================================================================
+
+# Carico le librerie necessarie
+library(readxl)
+library(ggplot2)
+library(dplyr)
+
+# Importo i dati
+setwd("C:/Runibo")
+dati2025 <- read_excel("C:/Runibo/dati_ornitologia_tratti_2013_2025_specchio.xlsx")
+
+# Preparo i dati per il grafico a specchio
+dati_grafico <- dati2025 %>%
+  filter(Anno %in% c(2013, 2025)) %>%
+  mutate(
+    Anno = as.character(Anno),
+    # Il 2013 diventa negativo (sinistra), il 2025 resta positivo (destra)
+    Abbondanza_Grafico = ifelse(Anno == "2013", -Abbondanza, Abbondanza)
+  )
+
+# Genero il Grafico a Specchio
+# NOTA: reorder(Specie, Abbondanza, FUN = sum) ordina le specie in base alla somma delle abbondanze dei due anni
+grafico_specchio <- ggplot(dati_grafico, aes(x = reorder(Specie, Abbondanza, FUN = sum), y = Abbondanza_Grafico, fill = Anno)) +
+  geom_bar(stat = "identity") +
+
+coord_flip() + # Ruota il grafico in orizzontale
+  scale_y_continuous(labels = abs) + # Mostra i valori di entrambi i lati come positivi
+  scale_fill_manual(values = c("2025" = "#2c7bb6", "2013" = "#d7191c"),
+                    labels = c("2025" = "Anno 2025", "2013" = "Anno 2013")) +
+  theme_minimal() +
+  labs(title = "Profilo della comunità ornitologica nidificante lungo il fiume Ombrone",
+       subtitle = "Confronto della dominanza % tra il 2013 (sinistra) e il 2025 (destra) in ordine decrescente",
+       x = "Specie",
+       y = "Dominanza %",
+       fill = "Anni a confronto") +
+  theme(axis.text.y = element_text(size = 8), 
+        legend.position = "bottom")
+
+# Visualizzo e salvo il grafico
+print(grafico_specchio)
+ggsave("grafico_specchio_anni_ordinato.png", width = 8, height = 6, dpi = 300)
 
 
+
+
+
+# ========================================================================================
 #### WILCOXON SPONDE TAGLI
+# ========================================================================================
+
 
 # 1. CARICAMENTO DEI DATI
 # Importa il file CSV (R riconosce automaticamente la struttura)
@@ -227,32 +276,41 @@ grafico2 <- ggplot(dati_tagli, aes(y = reorder(Specie, T_dx))) + # Ordina le spe
 grafico2
 ggsave("grafico_sponde_2025_2.png", width = 8, height = 6, dpi = 300)
 
+
+# ====================================================================================
 # 3. Grafico a specchio
+# ====================================================================================
 
-# 2. Struttura i dati nel formato corretto ("long format")
-# Supponiamo che il tuo dataset si chiami 'dati' e abbia le colonne: Specie, Transetto1, Transetto2
-
-# Applichiamo il segno meno solo ai valori del Transetto 1 per mandarli a sinistra
-dati_tagli$T_dx <- -dati_tagli$T_dx
-
-# Trasformiamo la tabella per renderla leggibile da ggplot
+# Strutturo i dati nel formato corretto ("long format")
+# NOTA: Non modifico i dati originali con il segno meno prima del pivot, 
+# così ggplot può calcolare la dominanza totale reale per l'ordinamento.
 dati_long <- pivot_longer(dati_tagli, cols = c(T_dx, T_sx), 
                           names_to = "Sponda", values_to = "Dominanza")
 
-# 3. Generazione del Grafico a Specchio
-grafico3 <- ggplot(dati_long, aes(x = reorder(Specie, Dominanza), y = Dominanza, fill = Sponda)) +
+# Creo una nuova colonna per il grafico: se è T_dx va a sinistra (negativo)
+dati_long <- dati_long %>%
+  mutate(Dominanza_Grafico = ifelse(Sponda == "T_dx", -Dominanza, Dominanza))
+
+# Genero il Grafico a Specchio
+# Ordino le specie in base alla somma della Dominanza reale (quella positiva)
+grafico3 <- ggplot(dati_long, aes(x = reorder(Specie, Dominanza, FUN = sum), y = Dominanza_Grafico, fill = Sponda)) +
   geom_bar(stat = "identity") +
+  
+  
   coord_flip() + # Ruota il grafico in orizzontale
-  scale_y_continuous(labels = abs) + # TRUCCO: mostra i valori a sinistra come positivi
+  scale_y_continuous(labels = abs) + # TRUCCO: mostra i valori negativi a sinistra come positivi
   scale_fill_manual(values = c("T_dx" = "#2c7bb6", "T_sx" = "#d7191c"),
-                    labels = c("T_dx" = "Sponda destra", "T_sx" = "Sponda sinistra")) +
+                    labels = c("T_dx" = "Sponda destra (sinistra)", "T_sx" = "Sponda sinistra (destra)")) +
   theme_minimal() +
-  labs(title = "Profilo della Comunità Ornitologica a Specchio",
-       subtitle = "Confronto della dominanza % tra le due sponde (33 specie)",
+  labs(title = "Profilo della comunità ornitologica nidificante lungo il fiume Ombrone",
+       subtitle = "Confronto della dominanza % a specchio (33 specie) in ordine decrescente",
        x = "Specie",
        y = "Dominanza %",
        fill = "Sponde a confronto") +
-  theme(axis.text.y = element_text(size = 8), # Rimpicciolisce i nomi delle specie per leggerli tutti
+  theme(axis.text.y = element_text(size = 8), # Leggibilità dei nomi delle specie
         legend.position = "bottom")
+
+# Visualizzo e salvo il grafico
 grafico3
 ggsave("grafico_sponde_2025_3.png", width = 8, height = 6, dpi = 300)
+
