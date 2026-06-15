@@ -1,0 +1,117 @@
+# =====================================================================
+# ---- CONFRONTO TEMPORARE: 2013-2025 ----
+# =====================================================================
+
+# ---- packages ----
+{
+  library(tidyverse)
+  library(readxl)
+  library(vegan) # per il calcolo degli indici ecologici
+  library(car) # per il test di Levene (omogeneità delle varianze)
+  library(MASS) # per glm.nb()
+  library(emmeans) # per i confronti post-hoc dei GLM
+  library(flextable)
+}
+
+
+## ---- load data ----
+{
+  specie_2025 <- readxl::read_xlsx(
+    "data/dati_ombrone_provvisori.xlsx", 
+    sheet = "Contatti_Specie" # occhio al nome del foglio di lavoro
+  )
+  segmenti <- readxl::read_xlsx(
+    "data/dati_ombrone_provvisori.xlsx", 
+    sheet = "Segmenti" 
+  )
+}
+
+# Supponiamo di partire dal dataset che contiene i contatti e le info sui segmenti
+# (quello che avete chiamato 'contatti_all' o simile)
+
+
+## ---- aggregazione dei dati per il 2025 ----
+dati_aggregati_2025 <- specie_2025 %>%
+  # 1. Agganciamo le info dei segmenti (serve per avere NOME_TRATTO e LUNGHEZZA_m)
+  left_join(segmenti, by = "ID_SEGMENTO") %>%
+  # 2. Aggreghiamo per NOME_TRATTO
+  group_by(NOME_TRATTO) %>%
+  summarise(
+    # Somma totale degli individui
+    Conteggio_Tot = sum(CONTEGGIO, na.rm = TRUE),
+    # Ricchezza totale (n° specie uniche viste in tutto il tratto)
+    Ricchezza_S = n_distinct(SPECIE),
+    # Lunghezza totale del tratto (somma delle lunghezze dei segmenti)
+    Lunghezza_Totale_m = sum(LUNGHEZZA_m, na.rm = TRUE),
+    # Elenco delle specie presenti (utile per il turnover di Jaccard)
+    Lista_Specie = paste(unique(SPECIE), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  mutate(ANNO = 2025)
+
+# Visualizziamo il risultato
+print(dati_aggregati_2025)
+
+
+## ---- aggregazione dei dati per il 2013 ----
+# devi leggere il dataset del 2013, fatto come contatti_specie
+# e aggregare i dati come fatto per il 2025
+
+## ---- unione dati 2013-2025 ----
+dataset_storico <- bind_rows(dati_agg_2013, dati_agg_2025)
+
+
+## ---- glm ----
+glm_storico <- glm(Ricchezza_S ~ NOME_TRATTO * as.factor(ANNO) + offset(log(Lunghezza_Totale_m)), 
+                   family = poisson(link = "log"), # o quasi-poisson
+                   data = dataset_storico)
+
+# Verifica la dispersione (se > 1.3, usa quasipoisson)
+summary(glm_storico)
+
+# Calcola le medie corrette per la lunghezza (tipo "Ricchezza standardizzata")
+medie_storiche <- emmeans(glm_storico, ~ NOME_TRATTO * ANNO, type = "response")
+# Grafico delle medie
+plot(medie_storiche) + 
+  theme_bw() +
+  labs(title = "Confronto storico della Ricchezza Specifica",
+       y = "Numero di specie (media predetta)",
+       x = "Tratto e Anno")
+
+
+## ---- analisi turnover con Jaccard ----
+# Calcoliamo gli elementi base per l'Indice di Jaccard
+specie_2013 <- unique(specie_2013$SPECIE)
+specie_2025 <- unique(specie_2025$SPECIE)
+
+comuni <- intersect(specie_2013, specie_2025)
+perse  <- setdiff(specie_2013, specie_2025)    # Presenti nel 2013, non nel 2025
+nuove  <- setdiff(specie_2025, specie_2013)    # Presenti nel 2025, non nel 2013
+
+jaccard_sim <- length(comuni) / length(union(specie_2013, specie_2025))
+turnover    <- 1 - jaccard_sim
+
+# 2. Creiamo un dataframe ordinato per la tabella
+tabella_jaccard <- data.frame(
+  Metrica = c("Similarità di Jaccard", 
+              "Turnover (Dissimilarità)", 
+              "Specie totali (2013)", 
+              "Specie totali (2025)", 
+              "Specie perse", 
+              "Specie nuove acquisite"),
+  Valore = c(round(jaccard_sim, 3), 
+             round(turnover, 3), 
+             length(specie_2013), 
+             length(specie_2025), 
+             length(perse), 
+             length(nuove))
+)
+
+# 3. Formattazione professionale con flextable
+library(flextable)
+tab_finale <- flextable(tabella_jaccard) %>%
+  set_header_labels(Metrica = "Parametro Ecologico", Valore = "Valore") %>%
+  theme_vanilla() %>%
+  bold(part = "header") %>%
+  autofit()
+tab_finale
