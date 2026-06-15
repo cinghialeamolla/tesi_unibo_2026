@@ -297,19 +297,24 @@ summary(risultato_simper)
 # ---- ESTRAZIONE E GENERAZIONE TABELLA SIMPER SPONDE T3 ----
 # =====================================================================
 
-# Trasformo l'output SIMPER in un dataframe pulito
+
+# Trasformo l'output SIMPER usando dplyr::select per evitare conflitti con MASS o terra
 df_simper_sponde <- as.data.frame(risultato_simper$integra_tagliata) %>%
   rownames_to_column(var = "Specie") %>%
-  # Seleziono solo le prime 7 specie (spiegano il 61% del turnover totale)
+  # Ordino le specie per importanza decrescente (contributo più alto in cima)
+  arrange(desc(average)) %>%
+  # Isolo le prime 7 specie strutturali (oltre il 60% della dissomiglianza)
   slice_head(n = 7) %>%
-  select(Specie, average, ava, avb, cumsum, p) %>%
+  # FORZO dplyr::select e uso 'cusum' (nome corretto nell'output di vegan)
+  dplyr::select(Specie, average, ava, avb, cusum, p) %>%
   mutate(
     Contrib_Percentuale = (average / sum(risultato_simper$integra_tagliata$average)) * 100,
-    Cumul_Percentuale   = cumsum * 100
+    Cumul_Percentuale   = cusum * 100
   ) %>%
-  select(Specie, ava, avb, Contrib_Percentuale, Cumul_Percentuale, p)
+  # Forzo dplyr::select anche qui per riordinare le colonne finali
+  dplyr::select(Specie, ava, avb, Contrib_Percentuale, Cumul_Percentuale, p)
 
-# Creo della Flextable formattata per l'italiano
+# Creazione della Flextable formattata per Word 
 tabella_simper_sponde <- flextable(df_simper_sponde) %>%
   set_header_labels(
     Specie            = "Specie di Uccello",
@@ -319,10 +324,10 @@ tabella_simper_sponde <- flextable(df_simper_sponde) %>%
     Cumul_Percentuale = "Contributo Cumulativo (%)",
     p                 = "p-value"
   ) %>%
-  # Formattazione numerica accademica
+  # Formattazione con la virgola decimale 
   colformat_double(j = c("ava", "avb", "Contrib_Percentuale", "Cumul_Percentuale"), digits = 2, decimal.mark = ",", big.mark = "") %>%
   colformat_double(j = "p", digits = 3, decimal.mark = ",", big.mark = "") %>%
-  # Sostituzione formale dei p-value significativi
+  # Sostituzione formale del p-value minimo con gli asterischi standard
   labelizor(j = "p", labels = c("0,001" = "< 0,001 ***"), part = "body") %>%
   theme_booktabs() %>%
   autofit() %>%
@@ -330,10 +335,15 @@ tabella_simper_sponde <- flextable(df_simper_sponde) %>%
   flextable::align(align = "center", part = "all") %>%
   flextable::align(j = "Specie", align = "left", part = "all")
 
-# Esportazione in Word
+# Esportazione finale del file Word sul tuo PC in C:/RTesi
 doc_simper_sp <- read_docx()
-doc_simper_sp <- body_add_par(doc_simper_sp, "Tabella 20 - Analisi SIMPER disaggregata per sponda nel tratto T3 (Anno 2025): specie responsabili della dissomiglianza strutturale (soglia cumulativa > 60%). ava = Sponda Integra, avb = Sponda Tagliata.", style = "Normal")
+doc_simper_sp <- body_add_par(
+  doc_simper_sp, 
+  "Tabella x.x - Analisi SIMPER disaggregata per sponda nel tratto T3 (Anno 2025): prime 7 specie responsabili della dissomiglianza strutturale (soglia cumulativa > 60%). ava = Sponda Integra, avb = Sponda Tagliata.", 
+  style = "Normal"
+)
 doc_simper_sp <- body_add_flextable(doc_simper_sp, value = tabella_simper_sponde)
 
+# Salvo il file docx definitivo
 save_as_docx(tabella_simper_sponde, path = "C:/RTesi/tabella_simper_sponde_T3.docx")
-print("--- TABELLA SIMPER SPONDE GENERATA CON SUCCESSO ---")
+print("--- SUCCESS: TABELLA WORD GENERATA E SALVATA IN C:/RTesi ---")
