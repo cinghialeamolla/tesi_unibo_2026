@@ -10,8 +10,8 @@ library(tidyverse)
 setwd("C:/RTesi")
 
 # --- LANDSAT 8 (2013) - Pixel 30m 
-b4_2013   <- rast("16_giugno_2013_LC08_B4.TIF") 
-b5_2013   <- rast("16_giugno_2013_LC08_B5.TIF") 
+b4_2013   <- rast("16_giugno_LC08_L2SP_2013_B4.tiff") 
+b5_2013   <- rast("16_giugno_LC08_L2SP_2013_B5.tiff") 
 ndvi_2013 <- (b5_2013 - b4_2013) / (b5_2013 + b4_2013)
 
 # --- SENTINEL-2 STANDARD (2025) - Pixel 10m
