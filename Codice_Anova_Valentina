@@ -29,7 +29,7 @@
   library(tidyverse)
   library(emmeans) # per i confronti post-hoc dei GLM
   library(dplyr)
-  library(flextable)
+  library(flextable)  # il mago delle tabelle
   library(dplyr)
   library(officer)
   library(patchwork)
@@ -64,9 +64,24 @@ setwd("C:/RTesi")
   )
 }
 
+## ------- controllo dati-----
+# Verifico se ci sono ID nel foglio specie che non esistono nel foglio segmenti
+
+id_orfani <- anti_join(specie, segmenti, by = "ID_SEGMENTO")
+
+if(nrow(id_orfani) > 0) {
+  print("Attenzione: Ci sono ID nei contatti che non esistono nei segmenti!")
+  print(unique(id_orfani$ID_SEGMENTO))
+} else {
+  print("Tutti gli ID dei contatti sono coerenti con il foglio Segmenti.")
+}
+# OUTPUT:   "Tutti gli ID dei contatti sono coerenti con il foglio Segmenti."
+# Ora posso procedere
+
+
 ## ---- data preparation ----
 {
-  # Filtriamo i segmenti del 2025
+  # Filtro i segmenti del 2025
   seg_2025 <- segmenti %>%
     filter(ANNO == 2025)
   
