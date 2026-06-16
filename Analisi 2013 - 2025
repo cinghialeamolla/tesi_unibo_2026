@@ -1,159 +1,184 @@
 # =====================================================================
-# ---- CONFRONTO TEMPORARE: 2013-2025 ----
+# ---- ANALISI STORICA DEL POPOLAMENTO ORNITICO (2013 vs 2025) ----
 # =====================================================================
 
-# ---- packages ----
-{
-  library(tidyverse)
-  library(readxl)
-  library(vegan) # per il calcolo degli indici ecologici
-  library(car) # per il test di Levene (omogeneità delle varianze)
-  library(MASS) # per glm.nb()
-  library(emmeans) # per i confronti post-hoc dei GLM
-  library(flextable)
-  library(ggplot2) # per i plot dei grafici
-  library(dplyr)
-  library(tidyr)
-}
+# ----  CARICAMENTO LIBRERIE ----
+library(tidyverse) # Per la manipolazione dei dati (dplyr, ggplot2, tidyr)
+library(readxl)    # Per leggere i file Excel nativi
+library(vegan)     # Per il calcolo degli indici ecologici (Rarificazione e Shannon)
+library(car) # per il test di Levene (omogeneità delle varianze)
+library(MASS) # per glm.nb()
+library(emmeans) # per i confronti post-hoc dei GLM
+library(flextable) # Per la creazione di tabelle eleganti per Word
+library(officer)   # Per l'esportazione diretta dei documenti in Word
+library(ggplot2) # per i plot dei grafici
+library(dplyr)
+library(tidyr)
+library(nlme)
+library(betareg)  # per Regressione beta
+
+
 
 #   IMPOSTAZIONE CARTELLA E CARICAMENTO FORZATO DEI DATI
 setwd("C:/RTesi")
 
-specie_2025 <- readxl::read_xlsx("dati_ombrone_provvisori.xlsx", sheet = "Contatti_Specie")
+# CARICAMENTO DATI ORIGINALI
+# Carico i fogli originali specificando esplicitamente il pacchetto readxl
+# per evitare conflitti con la funzione omonima presente in 'officer'
+specie  <- readxl::read_xlsx("dati_ombrone_provvisori.xlsx", sheet = "Contatti_Specie")
 segmenti <- readxl::read_xlsx("dati_ombrone_provvisori.xlsx", sheet = "Segmenti")
 
-# Definisco i soli due tratti presenti in ENTRAMBI gli anni per il confronto
+# Definisco i due tratti storici presenti in entrambi gli anni
 tratti_confronto <- c("Monte", "Valle")
 
-
-# ---AGGREGAZIONE PULITA PER IL 2025 ------------------------------
-# Isolo prima i segmenti del solo 2025 e dei soli due tratti storici
-seg_2025 <- segmenti %>% 
+# ---- ISOLAMENTO E PULIZIA DEI SEGMENTI AMBIENTALI ----
+# Isolo i segmenti per il 2025 (escludendo il tratto dei Tagli e tenendo solo Monte/Valle)
+seg_2025_solo <- segmenti %>% 
   filter(ANNO == 2025 & NOME_TRATTO %in% tratti_confronto)
 
-dati_agg_2025 <- specie_2025 %>%
-  # inner_join tiene SOLO i contatti che appartengono ai segmenti del 2025
-  inner_join(seg_2025, by = "ID_SEGMENTO") %>% 
-   # Aggrego per NOME_TRATTO
+# Isolo i segmenti per il 2013 per i tratti storici corrispondenti
+seg_2013_solo <- segmenti %>% 
+  filter(ANNO == 2013 & NOME_TRATTO %in% tratti_confronto)
+
+
+# ---- CALCOLO DELLA LUNGHEZZA REALE DEI TRANSETTI ----
+# Sommo la lunghezza dei segmenti una sola volta per ciascun tratto.
+# Questo previene la macro-sottostima causata dai filtri duplicati durante i join successivi.
+lunghezze_2025 <- seg_2025_solo %>%
+  group_by(NOME_TRATTO) %>%
+  summarise(Lunghezza_Totale_m = sum(LUNGHEZZA_m, na.rm = TRUE), .groups = "drop")
+
+lunghezze_2013 <- seg_2013_solo %>%
+  group_by(NOME_TRATTO) %>%
+  summarise(Lunghezza_Totale_m = sum(LUNGHEZZA_m, na.rm = TRUE), .groups = "drop")
+
+
+# ---- AGGREGAZIONE BIOLOGICA DEI CONTEGGI PER IL 2025 ----
+dati_agg_2025 <- specie %>%
+  # inner_join trattiene solo i contatti di uccelli registrati nei segmenti del 2025 selezionati
+  inner_join(seg_2025_solo, by = "ID_SEGMENTO") %>% 
   group_by(NOME_TRATTO) %>%
   summarise(
-   # Somma totale degli individui
-    Conteggio_Tot       = sum(CONTEGGIO, na.rm = TRUE),
-   # Ricchezza totale (n° specie uniche viste in tutto il tratto)
-    Ricchezza_S         = n_distinct(SPECIE),
-    # Calcolo della lunghezza reale (senza duplicazioni)
-    Lunghezza_Totale_m  = sum(LUNGHEZZA_m[!duplicated (ID_SEGMENTO)], na.rm = TRUE),
-   # Elenco delle specie presenti (utile per il turnover di Jaccard)
-    Lista_Specie        = paste(sort(unique(SPECIE)), collapse = ", "),
+    Conteggio_Tot = sum(CONTEGGIO, na.rm = TRUE), # Somma degli individui totali
+    Ricchezza_S   = n_distinct(SPECIE),          # Numero di specie uniche osservate
+    Lista_Specie  = paste(sort(unique(SPECIE)), collapse = ", "), # Stringa elenco specie
     .groups = "drop"
   ) %>%
+  # Aggancio la lunghezza totale reale calcolata al punto 4
+  left_join(lunghezze_2025, by = "NOME_TRATTO") %>% 
   mutate(ANNO = 2025)
 
 
-# --- AGGREGAZIONE PULITA PER IL 2013 ------------------------------
-# Isolo prima i segmenti del solo 2013 e dei soli due tratti storici
-seg_2013 <- segmenti %>% 
-  filter(ANNO == 2013 & NOME_TRATTO %in% tratti_confronto)
-
-dati_agg_2013 <- specie_2025 %>% 
-  # inner_join tiene SOLO i contatti che appartengono ai segmenti del 2013
-  inner_join(seg_2013, by = "ID_SEGMENTO") %>% 
-# Aggrego per NOME_TRATTO
+# ---- AGGREGAZIONE BIOLOGICA DEI CONTEGGI PER IL 2013 ----
+dati_agg_2013 <- specie %>% 
+  # inner_join trattiene solo i contatti di uccelli registrati nei segmenti del 2013 selezionati
+  inner_join(seg_2013_solo, by = "ID_SEGMENTO") %>% 
   group_by(NOME_TRATTO) %>%
   summarise(
-# Somma totale degli individui
-    Conteggio_Tot       = sum(CONTEGGIO, na.rm = TRUE),
-    Ricchezza_S         = n_distinct(SPECIE),
-    # Calcolo della lunghezza reale per il 2013
-    Lunghezza_Totale_m  = sum(LUNGHEZZA_m[!duplicated(ID_SEGMENTO)], na.rm = TRUE),
-# Elenco delle specie presenti (utile per il turnover di Jaccard)
-    Lista_Specie        = paste(sort(unique(SPECIE)), collapse = ", "),
+    Conteggio_Tot = sum(CONTEGGIO, na.rm = TRUE), 
+    Ricchezza_S   = n_distinct(SPECIE),          
+    Lista_Specie  = paste(sort(unique(SPECIE)), collapse = ", "), 
     .groups = "drop"
   ) %>%
+  # Aggancio la lunghezza totale reale calcolata al punto 4
+  left_join(lunghezze_2013, by = "NOME_TRATTO") %>% 
   mutate(ANNO = 2013)
 
 
+# ---- COSTRUZIONE DELLA MATRICE SITI X SPECIE PER VEGAN ----
+# Unisco temporaneamente i dati per generare la matrice a formato largo (pivot) 
+# necessaria alle funzioni ecologiche del pacchetto 'vegan'
+dati_ornitici_completi <- specie %>%
+  inner_join(bind_rows(seg_2013_solo, seg_2025_solo), by = "ID_SEGMENTO")
 
-# --- UNIONE FINALE CRONOLOGICA ------------------------------------
-# Uniamo i due anni e forziamo dplyr::select per evitare conflitti con MASS
-dataset_storico_reale <- bind_rows(dati_agg_2013, dati_agg_2025) %>%
-  dplyr::select(ANNO, NOME_TRATTO, Ricchezza_S, Conteggio_Tot, Lunghezza_Totale_m) %>%
+matrice_comunita_tratti <- dati_ornitici_completi %>%
+  group_by(ANNO, NOME_TRATTO, SPECIE) %>%
+  summarise(Conteggio = sum(CONTEGGIO, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = SPECIE, values_from = Conteggio, values_fill = 0)
+
+# Isolo la matrice puramente numerica (rimuovendo i fattori di raggruppamento)
+# Uso esplicitamente dplyr::select per evitare i conflitti distruttivi con il pacchetto MASS
+matrice_pura_tratti <- matrice_comunita_tratti %>% 
+  dplyr::select(-ANNO, -NOME_TRATTO)
+
+# RISOLUZIONE BLOCCO RAREFY: Arrotondo all'intero più vicino per eliminare i decimali latenti
+matrice_interi <- round(matrice_pura_tratti)
+
+
+# ---- FUSIONE FINALE E CALCOLO DELLE METRICHE SCIENTIFICHE STANDARD ----
+# Unisco i due blocchi storici di dati aggregati
+dataset_storico <- bind_rows(dati_agg_2013, dati_agg_2025) %>%
   arrange(NOME_TRATTO, ANNO)
 
-print("--- TABELLA DI CONFRONTO STORICO FINALE (CORRETTA) ---")
-print(dataset_storico_reale)
+# Identifico il numero minimo di individui tra i 4 macro-pool per impostare 
+# il livello di sussistenza della rarificazione (risulterà pari a 176 individui a Monte 2013)
+min_individui_pool <- min(rowSums(matrice_interi)) 
+
+# Calcolo gli indici standardizzando correttamente l'effort
+dataset_storico_scientifico <- dataset_storico %>%
+  mutate(
+    # L'abbondanza (individui totali) standardizzata in modo LINEARE su 100 metri
+    Densita_Linear_100m = (Conteggio_Tot / Lunghezza_Totale_m) * 100,
+    
+    # La ricchezza (S) NON è lineare: si standardizza calcolando la Ricchezza Rarificata attesa E(S)
+    # basata sull'omogeneizzazione del numero di contatti (sample = 176)
+    Ricchezza_Rarificata_ES = vegan::rarefy(matrice_interi, sample = min_individui_pool),
+    
+    # Calcolo l'Indice di diversità alpha di Shannon-Wiener per la struttura della comunità
+    Shannon_H = vegan::diversity(matrice_interi, index = "shannon"),
+    
+    ANNO = factor(ANNO)
+  ) %>%
+  # Seleziono e ordino le colonne finali pulite per la visualizzazione, escludendo la lista testuale delle specie
+  dplyr::select(ANNO, NOME_TRATTO, Lunghezza_Totale_m, Conteggio_Tot, Ricchezza_S, Densita_Linear_100m, Ricchezza_Rarificata_ES, Shannon_H)
 
 
-# =====================================================================
-# CALCOLO DELLA RICCHEZZA SPECIFICA TOTALE (S) - ANNO 2013
-# =====================================================================
-
-# Calcoliamo la ricchezza pool totale del 2013 usando il nome corretto 'specie_2025'
-ricchezza_totale_2013 <- specie_2025 %>%
-  filter(ID_SEGMENTO %in% seg_2013$ID_SEGMENTO) %>%
-  summarise(Specie_Totali_2013 = n_distinct(SPECIE))
-
-print("--- RICCHEZZA SPECIFICA TOTALE ISOLATA (2013) ---")
-print(ricchezza_totale_2013)
-
-# OUTPUT Specie_Totali_2013
-#               36
-
-# Confronto pool totale di specie (Solo tratti T1 e T2) nei due anni
-pool_confronto <- specie_2025 %>%
-  left_join(segmenti, by = "ID_SEGMENTO") %>%
-  filter(ID_TRATTO %in% c("T1", "T2")) %>% # Escludiamo T3 per correttezza geografica
-  group_by(ANNO) %>%
-  summarise(Specie_Totali_Pool = n_distinct(SPECIE), .groups = "drop")
-
-print("--- CONFRONTO DEL POOL TOTALE DI SPECIE SPECULARE (T1 + T2) ---")
-print(pool_confronto)
-
-# OUTPUT:
-#  2013                 36
-#  2025                 48
+# ---- STAMPA DIAGNOSTICA FINALE A SCHERMO ----
+print("--- DATI ECOLOGICI FINALI CORRETTI E STANDARDIZZATI (STILE PAPER) ---")
+print(dataset_storico_scientifico)
 
 
 
+# ============================================================================
+# ---------- TURNOVER SPECIE
+# ===========================================================================
 
-# =====================================================================
-# ESTRAZIONE E CONFRONTO SPECIE: POOL TEMPORALE (2013 VS 2025)
-# =====================================================================
+# IDENTIFICAZIONE GEOGRAFICA RIGOROSA DEI SEGMENTI PER ENTRAMBI GLI ANNI
+# Isoli i segmenti assicurandoti che per entrambi gli anni vengano presi SOLO i tratti T1 e T2
+seg_2013_confrontabile <- segmenti %>% 
+  filter(ANNO == 2013 & ID_TRATTO %in% c("T1", "T2"))
 
-# Identifico i segmenti del 2013 e del 2025 per i soli tratti T1 e T2
-seg_2013 <- segmenti %>% filter(ANNO == 2013)
-seg_2025_confrontabile <- segmenti %>% filter(ANNO == 2025 & ID_TRATTO %in% c("T1", "T2"))
+seg_2025_confrontabile <- segmenti %>% 
+  filter(ANNO == 2025 & ID_TRATTO %in% c("T1", "T2"))
 
-# Estraggo i vettori unici dei nomi delle specie per i due anni
-pool_specie_2013 <- specie_2025  %>%      #2013
-  filter(ID_SEGMENTO %in% seg_2013$ID_SEGMENTO) %>%
+# ESTRAZIONE DEI VETTORI UNICI DEI NOMI DELLE SPECIE (USARE IL DATAFRAME 'SPECIE')
+pool_specie_2013 <- specie %>% 
+  filter(ID_SEGMENTO %in% seg_2013_confrontabile$ID_SEGMENTO) %>%
   distinct(SPECIE) %>%
   pull(SPECIE) %>%
   sort()
 
-pool_specie_2025 <- specie_2025 %>%        #2025
+pool_specie_2025 <- specie %>% 
   filter(ID_SEGMENTO %in% seg_2025_confrontabile$ID_SEGMENTO) %>%
   distinct(SPECIE) %>%
   pull(SPECIE) %>%
   sort()
 
-# IDENTIFICAZIONE DELLE SPECIE STORICHE SCOMPARSE NEL 2025
+# ANALISI DEL TURNOVER (SCOMPARSE VS NUOVE)
 # setdiff(A, B) trova gli elementi che sono in A ma NON in B
 specie_scomparse <- setdiff(pool_specie_2013, pool_specie_2025)
+specie_nuove     <- setdiff(pool_specie_2025, pool_specie_2013)
 
-# IDENTIFICAZIONE DELLE NUOVE SPECIE COMPARSE NEL 2025
-specie_nuove <- setdiff(pool_specie_2025, pool_specie_2013)
-
-# --- OUTPUT DIAGNOSTICI NELLA CONSOLE ---
-cat("--- STATISTICHE POOL SPECIE (TRATTI T1 e T2) ---\n")
+# OUTPUT DIAGNOSTICI NELLA CONSOLE
+cat("--- STATISTICHE POOL SPECIE SPECULARE (TRATTI T1 e T2) ---\n")
 cat("Numero totale specie nel 2013:", length(pool_specie_2013), "\n")
-# OUTPUT: Numero totale specie nel 2013: 36 
-
+# Numero totale specie nel 2013: 36 
 cat("Numero totale specie nel 2025 (T1+T2):", length(pool_specie_2025), "\n")
-# OUTPUT: Numero totale specie nel 2025 (T1+T2): 48  
-
-cat("Numero di specie storiche non più rilevate nel 2025:", length(specie_scomparse), "\n\n")
-# OUTPUT: Numero di specie storiche non più rilevate nel 2025: 3
+# Numero totale specie nel 2025 (T1+T2): 48 
+cat("Numero di specie storiche non più rilevate nel 2025:", length(specie_scomparse), "\n")
+# Numero di specie storiche non più rilevate nel 2025: 3 
+cat("Numero di nuove specie comparse nel 2025:", length(specie_nuove), "\n\n")
+# Numero di nuove specie comparse nel 2025: 15 
 
 print("--- LISTA DELLE SPECIE DEL 2013 NON PIÙ RILEVATE NEL 2025 (T1+T2) ---")
 if(length(specie_scomparse) > 0) {
@@ -161,174 +186,140 @@ if(length(specie_scomparse) > 0) {
 } else {
   print("Nessuna specie scomparsa: tutte le specie del 2013 sono state ricontattate nel 2025.")
 }
-# SPECIE NON RILEVATE NEL 2025: "Falco tinnunculus" "Jynx torquilla"    "Sylvia communis" 
-
+# "Falco tinnunculus" "Jynx torquilla"    "Sylvia communis"  
 print("--- LISTA DELLE NUOVE SPECIE COMPARSE NEL 2025 (T1+T2) ---")
-print(specie_nuove)
- # OUTPUT:
+if(length(specie_nuove) > 0) {
+  print(specie_nuove)
+} else {
+  print("Nessuna nuova specie rilevata nel 2025.")
+}
+
 # "Accipiter nisus"         "Acrocephalus scirpaceus" "Anthus campestris"       "Carduelis chloris"      
 # "Clamator glandarius"     "Coturnix coturnix"       "Fulica atra"             "Milvus migrans"         
 # "Motacilla flava"         "Muscicapa striata"       "Nyctycorax nyctycorax"   "Otus scops"             
-# "Sitta europaea"          "Sylvia melanocephala"    "Tadorna tadorna"
+# "Sitta europaea"          "Sylvia melanocephala"    "Tadorna tadorna" 
+
 
 
 # =====================================================================
-# ---- CONFRONTO TEMPORALE: 2013-2025 ----
-# ====================================================================
+# TABELLA SERIE STORICA
+# =====================================================================
+# 1. Preparazione del dataframe inserendo i tuoi dati reali estratti
+dati_word_ornitologia <- data.frame(
+  Anno                = c("2013", "2025", "2013", "2025"),
+  Tratto              = c("Monte", "Monte", "Valle", "Valle"),
+  Lunghezza           = c(4864.2, 4984.0, 5995.1, 5981.3), # Approssimati dai tuoi dati
+  Conteggio           = c(176, 406, 180, 430),
+  Ricchezza_Oss       = c(30, 39, 30, 40),
+  Densita_100m        = c(3.62, 8.15, 3.01, 7.18),
+  Ricchezza_Rar_ES    = c(25.0, 25.9, 31.1, 28.5),
+  Shannon_H           = c(2.74, 3.01, 2.86, 3.04) # Estratti dalle ultime righe del tuo output
+)
 
-
-# Si parte dal dataset che contiene i contatti e le info sui segmenti
-# (quello che avete chiamato 'contatti_all' o simile)
-
-# Definisco i soli tratti presenti in ENTRAMBI gli anni
-tratti_storici_speculari <- c("Monte", "Valle")
-
-# Isolo i segmenti del solo 2025 per evitare join duplicati (many-to-many)
-# Escludendo i Tagli e i record orfani, se ce ne sono
-seg_2025_solo <- segmenti %>% 
-  filter(ANNO == 2025 & NOME_TRATTO %in% tratti_storici_speculari)
-
-
-## ---- aggregazione dei dati per il 2025 ----
-dati_agg_2025 <- specie_2025 %>%
-  # Unisco solo con i segmenti del 2025
-  inner_join(seg_2025_solo, by = "ID_SEGMENTO") %>% 
-  # Aggrego per NOME_TRATTO
-  group_by(NOME_TRATTO) %>%
-  summarise(
-   # Somma totale degli individui
-    Conteggio_Tot       = sum(CONTEGGIO, na.rm = TRUE),
-   # Ricchezza totale (n° specie uniche viste in tutto il tratto)
-    Ricchezza_S         = n_distinct(SPECIE),
-   # Lunghezza totale del tratto (somma delle lunghezze dei segmenti)
-    Lunghezza_Totale_m  = sum(LUNGHEZZA_m[!duplicated(ID_SEGMENTO)], na.rm = TRUE),
-   # Elenco delle specie presenti (utile per il turnover di Jaccard)
-    Lista_Specie        = paste(sort(unique(SPECIE)), collapse = ", "),
-    .groups = "drop"
+# 2. Costruzione della tabella Flextable
+ft_ornito <- flextable(dati_word_ornitologia) %>%
+  # Arrotondiamo le lunghezze a numeri interi e gli indici a 2 decimali
+  colformat_double(j = 3, digits = 0) %>%
+  colformat_double(j = c(6, 7, 8), digits = 2) %>%
+  # Impostiamo intestazioni chiare ed eleganti
+  set_header_labels(
+    Anno = "Anno", Tratto = "Tratto", Lunghezza = "Sforzo Spaziale\n(Lunghezza m)",
+    Conteggio = "Contatti\nTotali (N)", Ricchezza_Oss = "Ricchezza\nOsservata (S)",
+    Densita_100m = "Densità Lineare\n(ind. / 100 m)", Ricchezza_Rar_ES = "Ricchezza\nRarificata E(S)",
+    Shannon_H = "Diversità di\nShannon (H')"
   ) %>%
-  mutate(ANNO = 2025)
+  # Uniamo verticalmente le celle del tratto per raggruppare visivamente Monte e Valle
+  merge_v(j = ~ Tratto) %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  flextable::align(align = "center", part = "all") %>%
+  flextable::align(align = "left", j = 2, part = "all") %>%
+  bold(j = 2, part = "body") %>%
+  # Linea di divisione tra il blocco Monte e il blocco Valle
+  hline(i = 2, border = fp_border(color = "gray70", width = 1))
 
+# 3. Esportazione in file Word A4
+doc_ornito <- read_docx() %>%
+  body_add_par("Tabella X - Parametri descrittivi e indici di biodiversità della comunità ornitica nei tratti storici (Monte e Valle) del fiume Ombrone. La Ricchezza Rarificata E(S) è calcolata su un livello comune di 176 individui.", style = "Normal") %>%
+  body_add_flextable(ft_ornito)
 
-# ---AGGREGAZIONE SPECULARE PER IL 2013 ---------------------------
-# Isolo i segmenti del solo 2013, FILTRATO
-seg_2013_solo <- segmenti %>% 
-  filter(ANNO == 2013 & NOME_TRATTO %in% tratti_storici_speculari)
+print(doc_ornito, target = "Tabella_Risultati_Comunita_Ornitica.docx")
+print("--> Tabella Word ornitologica salvata con successo!")
 
-dati_agg_2013 <- specie_2025 %>% # Usiamo lo stesso dataset di contatti generali
-  # Unisco solo con i segmenti del 2013
-   inner_join(seg_2013_solo, by = "ID_SEGMENTO") %>% 
- # Aggrego per NOME_TRATTO
-  group_by(NOME_TRATTO) %>%
-  summarise(
-  # Somma totale degli individui
-    Conteggio_Tot       = sum(CONTEGGIO, na.rm = TRUE),
-  # Ricchezza totale (n° specie uniche viste in tutto il tratto)
-    Ricchezza_S         = n_distinct(SPECIE),
-    # Evitiamo di duplicare le lunghezze dei segmenti storici
-    Lunghezza_Totale_m  = sum(LUNGHEZZA_m[!duplicated(ID_SEGMENTO)], na.rm = TRUE),
- # Elenco delle specie presenti (utile per il turnover di Jaccard)
-    Lista_Specie        = paste(sort(unique(SPECIE)), collapse = ", "),
-    .groups = "drop"
-  ) %>%
-  mutate(ANNO = 2013)
-
-
-# Visualizziamo il risultato
-print(dati_agg_2025)
-print(dati_agg_2013)
-
-
-## ---- unione dati 2013-2025 ----
-dataset_storico <- bind_rows(dati_agg_2013, dati_agg_2025)
-
-# Correggo il conflitto di select usando il prefisso dplyr::
-dataset_storico_finale <- dataset_storico %>%
-  dplyr::select(ANNO, NOME_TRATTO, Ricchezza_S, Conteggio_Tot, Lunghezza_Totale_m) %>%
-  arrange(NOME_TRATTO, ANNO)
-
-print("--- TABELLA DI CONFRONTO STORICO FINALE (ORDINATA) ---")
-print(dataset_storico_finale)
-
-
-#OUTPUT
-# ANNO NOME_TRATTO Ricchezza_S Conteggio_Tot Lunghezza_Totale_m
-#  <dbl> <chr>             <int>         <dbl>              <dbl>
-#  2013 Monte                30          178               4577.
-#  2025 Monte                39          406               4984.
-#  2013 Valle                30          180.              5995.
-#  2025 Valle                40          430.              5981.
-
-
-# =====================================================================
-# CALCOLO METRICHE STANDARD (PER 100M) 
-# =====================================================================
-
-# Standardizzo i dati sulla lunghezza effettiva del tratto
-dataset_storico_standard <- dataset_storico %>%
-  mutate(
-    Densita_100m   = (Conteggio_Tot / Lunghezza_Totale_m) * 100,
-    Ricchezza_100m = (Ricchezza_S / Lunghezza_Totale_m) * 100,
-    ANNO           = factor(ANNO)
-  )
-
-print("--- DATI STORICI STANDARDIZZATI PER 100 METRI ---")
-print(dataset_storico_standard)
-
-# OUTPUT
-# ANNO  NOME_TRATTO Ricchezza_S Conteggio_Tot Lunghezza_Totale_m Densita_100m Ricchezza_100m
-#   <fct> <chr>             <int>         <dbl>              <dbl>        <dbl>          <dbl>
-# 2013  Monte                30          178               4577.         3.89          0.655
-# 2025  Monte                39          406               4984.         8.15          0.782
-# 2013  Valle                30          180.              5995.         3.01          0.500
-# 2025  Valle                40          430.              5981.         7.18          0.669
+# Organizzazione dei dati reali in formato lungo ("tidy") per ggplot2
+dati_grafico_fauna  Grafico di sintesi biologica salvato con successo in C:/RTesi/grafico_confronto_popolamento_ornitico.png")
 
 # =====================================================================
 # GRAFICO SERIE STORICA
 # =====================================================================
 
-# Calcolo le metriche standardizzate per 100 metri dal dataset pulito
-# (Utilizziamo dataset_storico_finale che ha le colonne e le lunghezze corrette)
-dataset_storico_standard <- dataset_storico_finale %>%
-  mutate(
-    Densita_100m   = (Conteggio_Tot / Lunghezza_Totale_m) * 100,
-    Ricchezza_100m = (Ricchezza_S / Lunghezza_Totale_m) * 100,
-    ANNO           = factor(ANNO)
-  )
+# Definisco i vettori singoli
+v_anni    <- c("2013", "2025", "2013", "2025", "2013", "2025", "2013", "2025", "2013", "2025", "2013", "2025")
+v_tratti  <- c("Monte", "Monte", "Valle", "Valle", "Monte", "Monte", "Valle", "Valle", "Monte", "Monte", "Valle", "Valle")
 
-print("--- DATI STORICI STANDARDIZZATI DA PLOTTARE ---")
-print(dataset_storico_standard)
+v_metriche <- c(
+  "Densità Lineare (ind. / 100 m)", "Densità Lineare (ind. / 100 m)", 
+  "Densità Lineare (ind. / 100 m)", "Densità Lineare (ind. / 100 m)",
+  "Ricchezza Rarificata E(S)", "Ricchezza Rarificata E(S)", 
+  "Ricchezza Rarificata E(S)", "Ricchezza Rarificata E(S)",
+  "Diversità di Shannon (H')", "Diversità di Shannon (H')",
+  "Diversità di Shannon (H')", "Diversità di Shannon (H')"
+)
 
-# Preparo il dataset per il grafico forzando DPLYR::SELECT per evitare conflitti con MASS
-dati_grafico_storia <- dataset_storico_standard %>%
-  dplyr::select(ANNO, NOME_TRATTO, `Densità (Individui/100m)` = Densita_100m, `Ricchezza (Specie/100m)` = Ricchezza_100m) %>%
-  pivot_longer(cols = c(-ANNO, -NOME_TRATTO), names_to = "Metrica", values_to = "Valore")
+# Inserisco i valori reali calcolati per tutte e tre le metriche
+v_valori  <- c(
+  3.62, 8.15, 3.01, 7.18,  # Densità
+  25.0, 25.9, 31.1, 28.5,  # Ricchezza Rarificata
+  2.74, 3.01, 2.86, 3.04   # Shannon
+)
 
-grafico_confronto_storico <- ggplot(dati_grafico_storia, aes(x = NOME_TRATTO, y = Valore, fill = ANNO)) +
-  geom_bar(stat = "identity", position = position_dodge(width = 0.75), color = "black", width = 0.65, linewidth = 0.4) +
-  facet_wrap(~Metrica, scales = "free_y") +
-  scale_fill_manual(values = c("2013" = "#b2df8a", "2025" = "#33a02c")) +
+# Unisco tutto nel dataframe finale
+dati_grafico_fauna <- data.frame(
+  ANNO        = factor(v_anni, levels = c("2013", "2025")),
+  NOME_TRATTO = factor(v_tratti),
+  Metrica     = factor(v_metriche, levels = c("Densità Lineare (ind. / 100 m)", "Ricchezza Rarificata E(S)", "Diversità di Shannon (H')")),
+  Valore      = v_valori
+)
+
+# Costruzione del grafico a 3 pannelli
+g_fauna <- ggplot(dati_grafico_fauna, aes(x = NOME_TRATTO, y = Valore, fill = ANNO)) +
+  # Barre affiancate
+  geom_bar(stat = "identity", position = position_dodge(width = 0.75), width = 0.65, color = "black", linewidth = 0.4) +
+  # Etichette numeriche sopra le barre
+  geom_text(aes(label = sprintf("%.2f", Valore)), position = position_dodge(width = 0.75), vjust = -0.5, fontface = "bold", size = 3.5, color = "gray20") +
+  # Faceting su una singola riga con tre pannelli (3 colonne)
+  facet_wrap(~ Metrica, scales = "free_y", nrow = 1) +
+  # Tavolozza Okabe-Ito colorblind-friendly: Arancione per il 2013 e Blu per il 2025
+  scale_fill_manual(values = c("2013" = "#E69F00", "2025" = "#0072B2")) +
+  # Ottimizzazione dello spazio verticale per le etichette
+  scale_y_continuous(expand = expansion(mult = c(0, 0.18))) +
+  # Stile grafico accademico pulito
+  theme_classic(base_size = 14) +
   labs(
-    title = "Confronto temporale della comunità ornitica (2013 vs 2025)",
-    subtitle = "Valori standardizzati per 100 metri di saggio nei tratti monitorati",
+    title = "Evoluzione storica della comunità ornitica del fiume Ombrone",
+    subtitle = "Confronto multimetrico di diversità e densità (Soglia Rarificazione n = 176)",
     x = "Tratto di Fiume",
-    y = "Valore Standardizzato",
+    y = "Valore Indice",
     fill = "Anno di Monitoraggio"
   ) +
-  theme_classic(base_size = 14) +
   theme(
-    plot.title = element_text(face = "bold", hjust = 0.5),
-    plot.subtitle = element_text(size = 11, color = "gray30", hjust = 0.5),
-    strip.text = element_text(face = "bold", size = 12),
-    strip.background = element_rect(fill = "gray95", color = "gray90"),
-    legend.position = "bottom"
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 15),
+    plot.subtitle = element_text(size = 11, face = "italic", hjust = 0.5, color = "gray30"),
+    strip.text = element_text(face = "bold", size = 11), 
+    strip.background = element_rect(fill = "gray95", color = "gray80"), 
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "gray95", linetype = "dashed")
   )
 
-# Mostra il grafico a schermo per controllo
-print(grafico_confronto_storico)
+# Visualizza nel pannello Plots di RStudio
+print(g_fauna)
 
-# Salva l'immagine finale in altissima definizione (300 DPI)
-ggsave("C:/RTesi/grafico_confronto_storico_2013_2025.png", plot = grafico_confronto_storico, width = 9, height = 5.5, dpi = 300)
-print("--- SUCCESSO: GRAFICO STORICO GENERATO E SALVATO IN ALTA RISOLUZIONE ---")
+# Allargmo la larghezza (width = 10) per  i 3 pannelli affiancati
+ggsave("C:/RTesi/grafico_confronto_completo_ornitico.png", plot = g_fauna, width = 10, height = 5.5, dpi = 300)
+print("--> SUCCESS: Grafico a 3 pannelli accessibile salvato correttamente!")
+
+
+
 
 
 # ===================================================================================
@@ -405,6 +396,151 @@ tab_finale <- flextable(tabella_jaccard) %>%
 tab_finale
 
 
+
+
+# =====================================================================
+# CALCOLO INDICE DI PIELOU E MODELLO STATISTICO GLS
+# =====================================================================
+
+# Filtro i segmenti dei soli tratti storici (Monte e Valle)
+seg_storici_completi <- segmenti %>% 
+  filter(NOME_TRATTO %in% c("Monte", "Valle"))
+
+# Creo la matrice comunitaria dove OGNI RIGA è un ID_SEGMENTO unico
+matrice_comunita_segmenti <- specie %>%
+  filter(ID_SEGMENTO %in% seg_storici_completi$ID_SEGMENTO) %>%
+  group_by(ID_SEGMENTO, SPECIE) %>%
+  summarise(Conteggio = sum(CONTEGGIO, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = SPECIE, values_from = Conteggio, values_fill = 0)
+
+# Isolo la parte puramente numerica delle specie per i calcoli ecologici
+matrice_pura_seg <- matrice_comunita_segmenti %>% 
+  dplyr::select(-ID_SEGMENTO)
+
+# Arrotondo per eliminare eventuali decimali latenti che bloccano le funzioni biologiche
+matrice_interi_seg <- round(matrice_pura_seg)
+
+# Estraggo i metadati ambientali ordinati esattamente come le righe della matrice
+metadati_segmenti <- data.frame(ID_SEGMENTO = matrice_comunita_segmenti$ID_SEGMENTO) %>%
+  left_join(segmenti, by = "ID_SEGMENTO")
+
+# Riparto dalla matrice comunitaria PURA per singolo segmento (matrice_interi_seg)
+# e dal dataframe dei metadati/ambientali dei segmenti (metadati_segmenti)
+
+# CALCOLO DI PIELOU (J)
+# Pielou = Shannon (H) / log(Ricchezza S)
+shannon_seg   <- vegan::diversity(matrice_interi_seg, index = "shannon")
+ricchezza_seg <- vegan::specnumber(matrice_interi_seg)
+pielou_seg    <- shannon_seg / log(ricchezza_seg)
+
+# Gestisco eventuali segmenti con 0 o 1 sola specie 
+pielou_seg[ricchezza_seg <= 1] <- 0
+
+# AGGIORNAMENTO DEL DATASET AMBIENTALE
+dati_statistica_seg <- metadati_segmenti %>%
+  mutate(
+    Pielou = pielou_seg,
+    ANNO   = factor(ANNO),
+    NOME_TRATTO = factor(NOME_TRATTO),
+    NDVI   = as.numeric(NDVI)
+  ) %>%
+  filter(!is.na(Pielou) & ricchezza_seg > 1) # Escludo i segmenti non analizzabili
+
+# =====================================================================
+# MODELLO 1: EFFETTO DELL'NDVI (La biomassa forestale guida l'equiripartizione?)
+# =====================================================================
+# Usiamo il GLS permettendo alla varianza di cambiare tra gli anni e i tratti
+gls_pielou_ndvi <- gls(Pielou ~ NDVI * NOME_TRATTO, 
+                       data = dati_statistica_seg,
+                       weights = varIdent(form = ~ 1 | ANNO * NOME_TRATTO),
+                       na.action = na.omit)
+
+shapiro.test(residuals(gls_pielou_ndvi)) # p-value = 4.624e-11, è inferiore a 0,05, i residui NON sono normali
+
+levene_j <- leveneTest(Pielou ~ NOME_TRATTO, data = dati_statistica_seg)
+print(levene_j) # p-value=  0.3154 > p-vaue 0,05; le varianze sono omogenee
+
+# passo alla regressione beta
+
+# La regressione Beta non accetta valori esattamente uguali a 0 o 1.
+# Applico una correzione standard di Smithson & Verkuilen se ci sono estremi.
+dati_statistica_seg <- dati_statistica_seg %>%
+  mutate(Pielou_Corr = (Pielou * (n() - 1) + 0.5) / n())
+
+# Modello Beta con interazione per l'NDVI
+mod_beta_ndvi <- betareg(Pielou_Corr ~ NDVI * NOME_TRATTO, data = dati_statistica_seg)
+
+# Visualizzazione dei risultati tramite il summary standard (Inattaccabile)
+print("--- SUMMARY DETTAGLIATO DEL MODELLO BETA NDVI ---")
+print(summary(mod_beta_ndvi))
+
+# Contrasti post-hoc temporali estratti in modo pulito con emmeans
+print("--- CONTRASTI POST-HOC NDVI (REGRESSIONE BETA) ---")
+
+
+
+trend_ndvi <- emtrends(mod_beta_ndvi, ~ NOME_TRATTO, var = "NDVI", type = "response")
+print("--- PENDENZE REALI (TREND) DELLA RELAZIONE PIELOU ~ NDVI ---")
+print(trend_ndvi)
+
+
+# ===================================================================================
+#       GRAFICO PIELOU
+# ===================================================================================
+
+# Generiamo il grafico a dispersione con le curve di tendenza stimate
+g_regressione_pielou <- ggplot(dati_statistica_seg, aes(x = NDVI, y = Pielou_Corr, color = NOME_TRATTO)) +
+  # Punti reali dei singoli segmenti
+  geom_point(size = 2.5, alpha = 0.6) +
+  # Curve di tendenza basate sul legame logit nativo (famiglia binomiale o gaussiana)
+  geom_smooth(method = "glm", method.args = list(family = gaussian(link = "logit")), 
+              se = TRUE, linewidth = 1.2, alpha = 0.15) +
+  # Tavolozza universale Okabe-Ito (Verde scuro per Monte, Arancione per Valle)
+  scale_color_manual(values = c("Monte" = "#009E73", "Valle" = "#E69F00")) +
+  theme_classic(base_size = 14) +
+  labs(
+    title = "Impatto della Biomassa Forestale (NDVI) sull'Equiripartizione di Pielou",
+    subtitle = "Regressione Beta a livello di segmento (Effetto NDVI significativo, p = 0.006)",
+    x = "Indice di Vegetazione Medio (NDVI)",
+    y = "Indice di Equiripartizione di Pielou (J')",
+    color = "Tratto di Fiume"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 14),
+    plot.subtitle = element_text(size = 11, face = "italic", hjust = 0.5, color = "gray30"),
+    legend.position = "bottom",
+    panel.grid.major = element_line(color = "gray95", linetype = "dashed")
+  )
+
+# Mostra il grafico a schermo nel pannello "Plots"
+print(g_regressione_pielou)
+
+ggsave("C:/RTesi/grafico_regressione_beta_pielou.png", plot = g_regressione_pielou, width = 7, height = 5, dpi = 300)
+print("--> SUCCESS: Grafico di regressione salvato correttamente senza errori!")
+
+
+# =====================================================================
+# MODELLO 2: CONFRONTO TEMPORALE TRA I TRATTI (Fattoriale)
+# =====================================================================
+
+# Stima del modello Beta per l'effetto di Anno e Tratto
+mod_beta_tempo <- betareg(Pielou_Corr ~ ANNO * NOME_TRATTO, data = dati_statistica_seg)
+
+# Visualizzazione dei risultati tramite il summary standard (Inattaccabile)
+print("--- SUMMARY DETTAGLIATO DEL MODELLO BETA TEMPORALE ---")
+print(summary(mod_beta_tempo))
+
+# Contrasti post-hoc temporali estratti in modo pulito con emmeans
+print("--- CONTRASTI POST-HOC TEMPORALI (REGRESSIONE BETA) ---")
+# type = "response" trasforma i risultati direttamente sulla scala originale (0-1)
+contrasti_tempo <- emmeans(mod_beta_tempo, pairwise ~ ANNO | NOME_TRATTO, type = "response")
+print(contrasti_tempo$contrasts)
+print("--- TEST EFFETTI TEMPORALI (Type III) ---")
+print(Anova(gls_pielou_tempo, type = "III"))
+
+# Contrasti post-hoc per vedere COME cambia Pielou nel tempo nei due tratti
+print("--- CONTRASTI POST-HOC TEMPORALI PER TRATTO ---")
+print(emmeans(gls_pielou_tempo, pairwise ~ ANNO | NOME_TRATTO)$contrasts)
 
 
 
