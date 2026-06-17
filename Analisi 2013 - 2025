@@ -3,7 +3,6 @@
 # =====================================================================
 
 # ----  CARICAMENTO LIBRERIE ----
-# ----  CARICAMENTO LIBRERIE ----
 
 library(tidyverse) # Include 'dplyr' (gestione tabelle), 'tidyr' (strutturazione), 'ggplot2' (grafici)
 library(readxl)    # Caricamento di file Excel (.xlsx)
@@ -22,7 +21,7 @@ library(betareg)  # per Regressione beta
 setwd("C:/RTesi")
 
 # CARICAMENTO DATI ORIGINALI
-# Carico i fogli originali specificando esplicitamente il pacchetto readxl
+# Carico i fogli originali specificando i percorsi espliciti
 # per evitare conflitti con la funzione omonima presente in 'officer'
 specie  <- readxl::read_xlsx("dati_ombrone_provvisori.xlsx", sheet = "Contatti_Specie")
 segmenti <- readxl::read_xlsx("dati_ombrone_provvisori.xlsx", sheet = "Segmenti")
@@ -32,110 +31,213 @@ tratti_confronto <- c("Monte", "Valle")
 
 # ---- ISOLAMENTO E PULIZIA DEI SEGMENTI AMBIENTALI ----
 # Isolo i segmenti per il 2025 (escludendo il tratto dei Tagli e tenendo solo Monte/Valle)
-seg_2025_solo <- segmenti %>% 
-  filter(ANNO == 2025 & NOME_TRATTO %in% tratti_confronto)
+seg_ambientali_storici <- segmenti %>% 
+  filter(NOME_TRATTO %in% tratti_confronto) %>%
+  mutate(ANNO = as.factor(ANNO), NOME_TRATTO = as.factor(NOME_TRATTO))
 
-# Isolo i segmenti per il 2013 per i tratti storici corrispondenti
-seg_2013_solo <- segmenti %>% 
-  filter(ANNO == 2013 & NOME_TRATTO %in% tratti_confronto)
-
-
-# ---- CALCOLO DELLA LUNGHEZZA REALE DEI TRANSETTI ----
-# Sommo la lunghezza dei segmenti una sola volta per ciascun tratto.
-# Questo previene la macro-sottostima causata dai filtri duplicati durante i join successivi.
-lunghezze_2025 <- seg_2025_solo %>%
-  group_by(NOME_TRATTO) %>%
+# Calcolo lo sforzo spaziale totale (lunghezza complessiva in metri) per Anno e Tratto.
+# Questo passaggio evita la macro-sottostima o duplicazione dei dati nei join biologici.
+lunghezze_tratti <- seg_ambientali_storici %>%
+  group_by(ANNO, NOME_TRATTO) %>%
   summarise(Lunghezza_Totale_m = sum(LUNGHEZZA_m, na.rm = TRUE), .groups = "drop")
 
-lunghezze_2013 <- seg_2013_solo %>%
-  group_by(NOME_TRATTO) %>%
-  summarise(Lunghezza_Totale_m = sum(LUNGHEZZA_m, na.rm = TRUE), .groups = "drop")
+# ----- AGGREGAZIONE DATI BIOLOGICI (CONTEGGI E RICCHEZZA) ----
+# Uniamo le osservazioni biologiche ai soli segmenti dei tratti storici
+dati_ornitici_storici <- specie %>%
+ # inner_join trattiene solo i contatti di uccelli registrati nei segmenti del 2025 selezionati
+  inner_join(seg_ambientali_storici, by = "ID_SEGMENTO")
 
-
-# ---- AGGREGAZIONE BIOLOGICA DEI CONTEGGI PER IL 2025 ----
-dati_agg_2025 <- specie %>%
-  # inner_join trattiene solo i contatti di uccelli registrati nei segmenti del 2025 selezionati
-  inner_join(seg_2025_solo, by = "ID_SEGMENTO") %>% 
-  group_by(NOME_TRATTO) %>%
+# Aggrego i contatti a livello di macro-pool (Anno x Tratto)
+dati_biologici_aggregati <- dati_ornitici_storici %>%
+  group_by(ANNO, NOME_TRATTO) %>%
   summarise(
-    Conteggio_Tot = sum(CONTEGGIO, na.rm = TRUE), # Somma degli individui totali
-    Ricchezza_S   = n_distinct(SPECIE),          # Numero di specie uniche osservate
-    Lista_Specie  = paste(sort(unique(SPECIE)), collapse = ", "), # Stringa elenco specie
+    Contatti_Totali_N = sum(CONTEGGIO, na.rm = TRUE),
+    Ricchezza_Osservata_S = n_distinct(SPECIE),
     .groups = "drop"
   ) %>%
-  # Aggancio la lunghezza totale reale calcolata al punto 4
-  left_join(lunghezze_2025, by = "NOME_TRATTO") %>% 
-  mutate(ANNO = 2025)
+  # Riconverto l'anno in fattore per garantire l'unione corretta
+  mutate(ANNO = as.factor(ANNO)) %>%
+  # Aggancio lo sforzo spaziale precedentemente calcolato
+  left_join(lunghezze_tratti, by = c("ANNO", "NOME_TRATTO"))
 
-
-# ---- AGGREGAZIONE BIOLOGICA DEI CONTEGGI PER IL 2013 ----
-dati_agg_2013 <- specie %>% 
-  # inner_join trattiene solo i contatti di uccelli registrati nei segmenti del 2013 selezionati
-  inner_join(seg_2013_solo, by = "ID_SEGMENTO") %>% 
-  group_by(NOME_TRATTO) %>%
-  summarise(
-    Conteggio_Tot = sum(CONTEGGIO, na.rm = TRUE), 
-    Ricchezza_S   = n_distinct(SPECIE),          
-    Lista_Specie  = paste(sort(unique(SPECIE)), collapse = ", "), 
-    .groups = "drop"
-  ) %>%
-  # Aggancio la lunghezza totale reale calcolata al punto 4
-  left_join(lunghezze_2013, by = "NOME_TRATTO") %>% 
-  mutate(ANNO = 2013)
-
-
-# ---- COSTRUZIONE DELLA MATRICE SITI X SPECIE PER VEGAN ----
-# Unisco temporaneamente i dati per generare la matrice a formato largo (pivot) 
-# necessaria alle funzioni ecologiche del pacchetto 'vegan'
-dati_ornitici_completi <- specie %>%
-  inner_join(bind_rows(seg_2013_solo, seg_2025_solo), by = "ID_SEGMENTO")
-
-matrice_comunita_tratti <- dati_ornitici_completi %>%
+# Generiamo la matrice in formato "largo" (Pivot) richiesta dalle metriche ecologiche
+matrice_comunita_tratti <- dati_ornitici_storici %>%
   group_by(ANNO, NOME_TRATTO, SPECIE) %>%
   summarise(Conteggio = sum(CONTEGGIO, na.rm = TRUE), .groups = "drop") %>%
   pivot_wider(names_from = SPECIE, values_from = Conteggio, values_fill = 0)
 
-# Isolo la matrice puramente numerica (rimuovendo i fattori di raggruppamento)
-# Uso esplicitamente dplyr::select per evitare i conflitti distruttivi con il pacchetto MASS
-matrice_pura_tratti <- matrice_comunita_tratti %>% 
+# Isoliamo la sola matrice numerica eliminando le colonne di testo
+# Usiamo dplyr::select in modo esplicito per evitare il blocco generato dal pacchetto MASS
+matrice_pura <- matrice_comunita_tratti %>% 
   dplyr::select(-ANNO, -NOME_TRATTO)
 
-# RISOLUZIONE BLOCCO RAREFY: Arrotondo all'intero più vicino per eliminare i decimali latenti
-matrice_interi <- round(matrice_pura_tratti)
+# Arrotondiamo i valori all'intero più vicino per superare il blocco degli algoritmi combinatori di rarefy
+matrice_interi <- round(matrice_pura)
 
 
-# ---- FUSIONE FINALE E CALCOLO DELLE METRICHE SCIENTIFICHE STANDARD ----
-# Unisco i due blocchi storici di dati aggregati
-dataset_storico <- bind_rows(dati_agg_2013, dati_agg_2025) %>%
-  arrange(NOME_TRATTO, ANNO)
+# ---- CALCOLO METRICHE SCIENTIFICHE (BIODIVERSITÀ E COMPILAZIONE TABELLA ) ----
+# Identifico il livello minimo di sussistenza campionaria (pari a 176 individui di Monte 2013)
+min_individui_pool <- min(rowSums(matrice_interi))
 
-# Identifico il numero minimo di individui tra i 4 macro-pool per impostare 
-# il livello di sussistenza della rarificazione (risulterà pari a 176 individui a Monte 2013)
-min_individui_pool <- min(rowSums(matrice_interi)) 
+# Calcolo in blocco gli indici ecologici direttamente sulla matrice strutturata
+vettore_rarificazione <- vegan::rarefy(matrice_interi, sample = min_individui_pool)
+vettore_shannon       <- vegan::diversity(matrice_interi, index = "shannon")
 
-# Calcolo gli indici standardizzando correttamente l'effort
-dataset_storico_scientifico <- dataset_storico %>%
+# Costruisco il dataframe temporaneo degli indici biologici complessi
+indici_ecologici_df <- matrice_comunita_tratti %>%
+  dplyr::select(ANNO, NOME_TRATTO) %>%
   mutate(
-    # L'abbondanza (individui totali) standardizzata in modo LINEARE su 100 metri
-    Densita_Linear_100m = (Conteggio_Tot / Lunghezza_Totale_m) * 100,
-    
-    # La ricchezza (S) NON è lineare: si standardizza calcolando la Ricchezza Rarificata attesa E(S)
-    # basata sull'omogeneizzazione del numero di contatti (sample = 176)
-    Ricchezza_Rarificata_ES = vegan::rarefy(matrice_interi, sample = min_individui_pool),
-    
-    # Calcolo l'Indice di diversità alpha di Shannon-Wiener per la struttura della comunità
-    Shannon_H = vegan::diversity(matrice_interi, index = "shannon"),
-    
-    ANNO = factor(ANNO)
+    Ricchezza_Rarificata_ES = vettore_rarificazione,
+    Diversita_Shannon_H     = vettore_shannon
   ) %>%
-  # Seleziono e ordino le colonne finali pulite per la visualizzazione, escludendo la lista testuale delle specie
-  dplyr::select(ANNO, NOME_TRATTO, Lunghezza_Totale_m, Conteggio_Tot, Ricchezza_S, Densita_Linear_100m, Ricchezza_Rarificata_ES, Shannon_H)
+  mutate(ANNO = as.factor(ANNO))
 
+# Unisco tutte le informazioni e calcoliamo i parametri lineari standardizzati
+Tabella_xx_Finale <- dati_biologici_aggregati %>%
+  left_join(indici_ecologici_df, by = c("ANNO", "NOME_TRATTO")) %>%
+  mutate(
+    # Calcolo della densità lineare standardizzata su base 100 metri
+    Densita_Lineare_100m = (Contatti_Totali_N / Lunghezza_Totale_m) * 100
+  ) %>%
+  # Ordino l'output finale in modo logico e speculare alla tesi
+  arrange(ANNO, NOME_TRATTO) %>%
+  dplyr::select(
+    Anno = ANNO,
+    Tratto = NOME_TRATTO,
+    `Sforzo Spaziale (m)` = Lunghezza_Totale_m,
+    `Contatti Totali (N)` = Contatti_Totali_N,
+    `Ricchezza Osservata (S)` = Ricchezza_Osservata_S,
+    `Densità Lineare (ind. / 100 m)` = Densita_Lineare_100m,
+    `Ricchezza Rarificata E(S)` = Ricchezza_Rarificata_ES,
+    `Diversità di Shannon (H')` = Diversita_Shannon_H
+  )
 
 # ---- STAMPA DIAGNOSTICA FINALE A SCHERMO ----
 print("--- DATI ECOLOGICI FINALI CORRETTI E STANDARDIZZATI (STILE PAPER) ---")
-print(dataset_storico_scientifico)
+print(Tabella_xx_Finale)
 
+# OUTPUT
+# Anno  Tratto `Sforzo Spaziale (m)` `Contatti Totali (N)` `Ricchezza Osservata (S)` `Densità Lineare (ind. / 100 m)` `Ricchezza Rarificata E(S)` `Diversità di Shannon (H')`
+# <fct> <fct>                  <dbl>                 <dbl>                     <int>                            <dbl>                       <dbl>                       <dbl>
+# 2013  Monte                  4864.                  176                         30                             3.62                        25                          2.70
+# 2025  Monte                  4984.                  406                         39                             8.15                        31.1                        3.00
+# 2013  Valle                  5995.                  180.                        30                             3.01                        25.9                        2.83
+# 2025  Valle                  5981.                  430.                        40                             7.18                        28.5                        3.01
+
+
+
+# =====================================================================
+# TABELLA SERIE STORICA
+# =====================================================================
+# 1. Preparazione del dataframe inserendo i tuoi dati reali estratti
+dati_word_ornitologia <- data.frame(
+  Anno                = c("2013", "2025", "2013", "2025"),
+  Tratto              = c("Monte", "Monte", "Valle", "Valle"),
+  Lunghezza           = c(4864.2, 4984.0, 5995.1, 5981.3), # Approssimati dai tuoi dati
+  Conteggio           = c(176, 406, 180, 430),
+  Ricchezza_Oss       = c(30, 39, 30, 40),
+  Densita_100m        = c(3.62, 8.15, 3.01, 7.18),
+  Ricchezza_Rar_ES    = c(25.0, 31.1, 25.9, 28.5),
+  Shannon_H           = c(2.70, 3.00, 2.83, 3.01) # Estratti dalle ultime righe del tuo output
+)
+
+# 2. Costruzione della tabella Flextable
+ft_ornito <- flextable(dati_word_ornitologia) %>%
+  # Arrotondiamo le lunghezze a numeri interi e gli indici a 2 decimali
+  colformat_double(j = 3, digits = 0) %>%
+  colformat_double(j = c(6, 7, 8), digits = 2) %>%
+  # Impostiamo intestazioni chiare ed eleganti
+  set_header_labels(
+    Anno = "Anno", Tratto = "Tratto", Lunghezza = "Sforzo Spaziale\n(Lunghezza m)",
+    Conteggio = "Contatti\nTotali (N)", Ricchezza_Oss = "Ricchezza\nOsservata (S)",
+    Densita_100m = "Densità Lineare\n(ind. / 100 m)", Ricchezza_Rar_ES = "Ricchezza\nRarificata E(S)",
+    Shannon_H = "Diversità di\nShannon (H')"
+  ) %>%
+  # Uniamo verticalmente le celle del tratto per raggruppare visivamente Monte e Valle
+  merge_v(j = ~ Tratto) %>%
+  theme_booktabs() %>%
+  autofit() %>%
+  flextable::align(align = "center", part = "all") %>%
+  flextable::align(align = "left", j = 2, part = "all") %>%
+  bold(j = 2, part = "body") %>%
+  # Linea di divisione tra il blocco Monte e il blocco Valle
+  hline(i = 2, border = fp_border(color = "gray70", width = 1))
+
+# 3. Esportazione in file Word A4
+doc_ornito <- read_docx() %>%
+  body_add_par("Tabella X - Parametri descrittivi e indici di biodiversità della comunità ornitica nei tratti storici (Monte e Valle) del fiume Ombrone. La Ricchezza Rarificata E(S) è calcolata su un livello comune di 176 individui.", style = "Normal") %>%
+  body_add_flextable(ft_ornito)
+
+print(doc_ornito, target = "Tabella_Risultati_Comunita_Ornitica.docx")
+print("--> Tabella Word ornitologica salvata con successo!")
+
+
+# =====================================================================
+# GRAFICO SERIE STORICA
+# =====================================================================
+
+# Definisco i vettori singoli
+v_anni    <- c("2013", "2025", "2013", "2025", "2013", "2025", "2013", "2025")
+v_tratti  <- c("Monte", "Monte", "Valle", "Valle", "Monte", "Monte", "Valle", "Valle")
+
+v_metriche <- c(
+  "Densità Lineare (ind. / 100 m)", "Densità Lineare (ind. / 100 m)", 
+  "Densità Lineare (ind. / 100 m)", "Densità Lineare (ind. / 100 m)",
+  "Ricchezza Rarificata E(S)", "Ricchezza Rarificata E(S)", 
+  "Ricchezza Rarificata E(S)", "Ricchezza Rarificata E(S)"
+)
+
+# Inserisco i valori reali calcolati per tutte e tre le metriche
+v_valori  <- c(
+ 3.62, 8.15, 3.01, 7.18,  # Densità Lineare
+  25.0, 31.1, 25.9, 28.5   # Ricchezza Rarificata
+  )
+
+# Unisco tutto nel dataframe finale
+dati_grafico_fauna <- data.frame(
+  ANNO        = factor(v_anni, levels = c("2013", "2025")),
+  NOME_TRATTO = factor(v_tratti, levels = c("Monte", "Valle")),
+  Metrica     = factor(v_metriche, levels = c("Densità Lineare (ind. / 100 m)", "Ricchezza Rarificata E(S)")),
+  Valore      = v_valori
+)
+
+# Costruzione del grafico a 2 pannelli
+g_fauna <- ggplot(dati_grafico_fauna, aes(x = NOME_TRATTO, y = Valore, fill = ANNO)) +
+  # Barre affiancate
+  geom_bar(stat = "identity", position = position_dodge(width = 0.75), width = 0.65, color = "black", linewidth = 0.4) +
+ # Etichette numeriche sopra le barre
+  geom_text(aes(label = sprintf("%.2f", Valore)), position = position_dodge(width = 0.75), vjust = -0.5, fontface = "bold", size = 3.5, color = "gray20") +
+  # Faceting su una singola riga con due pannelli (2 colonne)
+  facet_wrap(~ Metrica, scales = "free_y", nrow = 1) +
+  # Tavolozza Okabe-Ito colorblind-friendly: Arancione per il 2013 e Blu per il 2025
+  scale_fill_manual(values = c("2013" = "#E69F00", "2025" = "#0072B2")) +
+  # Ottimizzazione dello spazio verticale per le etichette
+  scale_y_continuous(expand = expansion(mult = c(0, 0.18))) +
+  # Stile grafico accademico pulito
+  theme_classic(base_size = 14) +
+  labs(
+    title = "Evoluzione storica della comunità ornitica del fiume Ombrone",
+    subtitle = "Confronto multimetrico di ricchezza e densità (Soglia Rarificazione n = 176)",
+    x = "Tratto di Fiume",
+    y = "Valore Indice",
+    fill = "Anno di Monitoraggio"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 14),
+    plot.subtitle = element_text(size = 11, face = "italic", hjust = 0.5, color = "gray30"),
+    strip.text = element_text(face = "bold", size = 11), 
+    strip.background = element_rect(fill = "gray95", color = "gray80"), 
+    legend.position = "bottom",
+    axis.text = element_text(color = "black"),
+    panel.grid.major.y = element_line(color = "gray95", linetype = "dashed")
+  )
+
+# Visualizza nel pannello Plots di RStudio
+print(g_fauna)
+
+# Salvataggio
+ggsave("C:/RTesi/grafico_confronto_completo_ornitico.png", plot = g_fauna, width = 8.5, height = 5.5, dpi = 300)
+print("--> SUCCESS: Grafico a 2 pannelli salvato correttamente!")
 
 
 # ============================================================================
@@ -197,126 +299,6 @@ if(length(specie_nuove) > 0) {
 # "Clamator glandarius"     "Coturnix coturnix"       "Fulica atra"             "Milvus migrans"         
 # "Motacilla flava"         "Muscicapa striata"       "Nyctycorax nyctycorax"   "Otus scops"             
 # "Sitta europaea"          "Sylvia melanocephala"    "Tadorna tadorna" 
-
-
-
-# =====================================================================
-# TABELLA SERIE STORICA
-# =====================================================================
-# 1. Preparazione del dataframe inserendo i tuoi dati reali estratti
-dati_word_ornitologia <- data.frame(
-  Anno                = c("2013", "2025", "2013", "2025"),
-  Tratto              = c("Monte", "Monte", "Valle", "Valle"),
-  Lunghezza           = c(4864.2, 4984.0, 5995.1, 5981.3), # Approssimati dai tuoi dati
-  Conteggio           = c(176, 406, 180, 430),
-  Ricchezza_Oss       = c(30, 39, 30, 40),
-  Densita_100m        = c(3.62, 8.15, 3.01, 7.18),
-  Ricchezza_Rar_ES    = c(25.0, 25.9, 31.1, 28.5),
-  Shannon_H           = c(2.74, 3.01, 2.86, 3.04) # Estratti dalle ultime righe del tuo output
-)
-
-# 2. Costruzione della tabella Flextable
-ft_ornito <- flextable(dati_word_ornitologia) %>%
-  # Arrotondiamo le lunghezze a numeri interi e gli indici a 2 decimali
-  colformat_double(j = 3, digits = 0) %>%
-  colformat_double(j = c(6, 7, 8), digits = 2) %>%
-  # Impostiamo intestazioni chiare ed eleganti
-  set_header_labels(
-    Anno = "Anno", Tratto = "Tratto", Lunghezza = "Sforzo Spaziale\n(Lunghezza m)",
-    Conteggio = "Contatti\nTotali (N)", Ricchezza_Oss = "Ricchezza\nOsservata (S)",
-    Densita_100m = "Densità Lineare\n(ind. / 100 m)", Ricchezza_Rar_ES = "Ricchezza\nRarificata E(S)",
-    Shannon_H = "Diversità di\nShannon (H')"
-  ) %>%
-  # Uniamo verticalmente le celle del tratto per raggruppare visivamente Monte e Valle
-  merge_v(j = ~ Tratto) %>%
-  theme_booktabs() %>%
-  autofit() %>%
-  flextable::align(align = "center", part = "all") %>%
-  flextable::align(align = "left", j = 2, part = "all") %>%
-  bold(j = 2, part = "body") %>%
-  # Linea di divisione tra il blocco Monte e il blocco Valle
-  hline(i = 2, border = fp_border(color = "gray70", width = 1))
-
-# 3. Esportazione in file Word A4
-doc_ornito <- read_docx() %>%
-  body_add_par("Tabella X - Parametri descrittivi e indici di biodiversità della comunità ornitica nei tratti storici (Monte e Valle) del fiume Ombrone. La Ricchezza Rarificata E(S) è calcolata su un livello comune di 176 individui.", style = "Normal") %>%
-  body_add_flextable(ft_ornito)
-
-print(doc_ornito, target = "Tabella_Risultati_Comunita_Ornitica.docx")
-print("--> Tabella Word ornitologica salvata con successo!")
-
-
-# =====================================================================
-# GRAFICO SERIE STORICA
-# =====================================================================
-
-# Definisco i vettori singoli
-v_anni    <- c("2013", "2025", "2013", "2025", "2013", "2025", "2013", "2025", "2013", "2025", "2013", "2025")
-v_tratti  <- c("Monte", "Monte", "Valle", "Valle", "Monte", "Monte", "Valle", "Valle", "Monte", "Monte", "Valle", "Valle")
-
-v_metriche <- c(
-  "Densità Lineare (ind. / 100 m)", "Densità Lineare (ind. / 100 m)", 
-  "Densità Lineare (ind. / 100 m)", "Densità Lineare (ind. / 100 m)",
-  "Ricchezza Rarificata E(S)", "Ricchezza Rarificata E(S)", 
-  "Ricchezza Rarificata E(S)", "Ricchezza Rarificata E(S)",
-  "Diversità di Shannon (H')", "Diversità di Shannon (H')",
-  "Diversità di Shannon (H')", "Diversità di Shannon (H')"
-)
-
-# Inserisco i valori reali calcolati per tutte e tre le metriche
-v_valori  <- c(
-  3.62, 8.15, 3.01, 7.18,  # Densità
-  25.0, 25.9, 31.1, 28.5,  # Ricchezza Rarificata
-  2.74, 3.01, 2.86, 3.04   # Shannon
-)
-
-# Unisco tutto nel dataframe finale
-dati_grafico_fauna <- data.frame(
-  ANNO        = factor(v_anni, levels = c("2013", "2025")),
-  NOME_TRATTO = factor(v_tratti),
-  Metrica     = factor(v_metriche, levels = c("Densità Lineare (ind. / 100 m)", "Ricchezza Rarificata E(S)", "Diversità di Shannon (H')")),
-  Valore      = v_valori
-)
-
-# Costruzione del grafico a 3 pannelli
-g_fauna <- ggplot(dati_grafico_fauna, aes(x = NOME_TRATTO, y = Valore, fill = ANNO)) +
-  # Barre affiancate
-  geom_bar(stat = "identity", position = position_dodge(width = 0.75), width = 0.65, color = "black", linewidth = 0.4) +
-  # Etichette numeriche sopra le barre
-  geom_text(aes(label = sprintf("%.2f", Valore)), position = position_dodge(width = 0.75), vjust = -0.5, fontface = "bold", size = 3.5, color = "gray20") +
-  # Faceting su una singola riga con tre pannelli (3 colonne)
-  facet_wrap(~ Metrica, scales = "free_y", nrow = 1) +
-  # Tavolozza Okabe-Ito colorblind-friendly: Arancione per il 2013 e Blu per il 2025
-  scale_fill_manual(values = c("2013" = "#E69F00", "2025" = "#0072B2")) +
-  # Ottimizzazione dello spazio verticale per le etichette
-  scale_y_continuous(expand = expansion(mult = c(0, 0.18))) +
-  # Stile grafico accademico pulito
-  theme_classic(base_size = 14) +
-  labs(
-    title = "Evoluzione storica della comunità ornitica del fiume Ombrone",
-    subtitle = "Confronto multimetrico di diversità e densità (Soglia Rarificazione n = 176)",
-    x = "Tratto di Fiume",
-    y = "Valore Indice",
-    fill = "Anno di Monitoraggio"
-  ) +
-  theme(
-    plot.title = element_text(face = "bold", hjust = 0.5, size = 15),
-    plot.subtitle = element_text(size = 11, face = "italic", hjust = 0.5, color = "gray30"),
-    strip.text = element_text(face = "bold", size = 11), 
-    strip.background = element_rect(fill = "gray95", color = "gray80"), 
-    legend.position = "bottom",
-    panel.grid.major.y = element_line(color = "gray95", linetype = "dashed")
-  )
-
-# Visualizza nel pannello Plots di RStudio
-print(g_fauna)
-
-# Allargmo la larghezza (width = 10) per  i 3 pannelli affiancati
-ggsave("C:/RTesi/grafico_confronto_completo_ornitico.png", plot = g_fauna, width = 10, height = 5.5, dpi = 300)
-print("--> SUCCESS: Grafico a 3 pannelli accessibile salvato correttamente!")
-
-
-
 
 
 # ===================================================================================
