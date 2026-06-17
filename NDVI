@@ -104,114 +104,90 @@ print("--> SUCCESS: Tabella salvata!")
 # ---- ANALISI NDVI (2025) ----
 # =====================================================================
 
+library(readxl)    # Per il caricamento dei fogli Excel (.xlsx)
+library(vegan)     # Per l'analisi ecologica multivariate e indici comunitari
+library(car)       # Fondamentale per il test di Levene e l'ANOVA di Tipo III (funzione Anova)
+library(MASS)      # Richiesto per la modellazione avanzata di conteggi (funzione glm.nb)
+library(tidyverse) # Include dplyr (manipolazione), tidyr (strutturazione) e ggplot2 (grafica)
+library(emmeans)   # Per estrarre le medie marginali stimate e i contrasti di Tukey
+library(flextable) # Per la formattazione di tabelle in stile scientifico formale
+library(patchwork) # Consente la combinazione e l'impaginazione di grafici multipli
+library(nlme)      # Per i modelli GLS (Generalized Least Squares) con pesi varIdent
+library(ggdist)    # Per la creazione di grafici avanzati sulla distribuzione dei dati
+library(officer)   # Permette ad R di scrivere e salvare direttamente documenti in Word (.docx)
+library(conflicted)# Gestisce in modo sicuro le sovrapposizioni di funzioni tra pacchetti
 
-## ---- packages ----
-#  install.packages("tidyverse")
-#  install.packages("readxl")
-#  install.packages("vegan")
-#  install.packages("car")
-#  install.packages("MASS")
-#  install.packages("emmeans")
-#  install.packages("patchwork")
-#  install.packages("ggdist")
-#  install.packages("GGally")
-#  install.packages("flextable")
 
-
-
-{
-  library(readxl)
-  library(vegan) # per il calcolo degli indici ecologici
-  library(car) # per il test di Levene (omogeneità delle varianze)
-  library(MASS) # per glm.nb()
-  library(tidyverse)
-  library(emmeans) # per i confronti post-hoc dei GLM
-  library(dplyr)
-  library(flextable)
-  library(patchwork)
-  library(nlme)
-  library(ggdist)
-  library(officer)
-}
-
-# Ho dovuto risolvere un probema di conflitto tra pacchetti istallati sul mio R
-library(conflicted)
+# ---- RISOLUZIONE DEI CONFLITTI DI FUNZIONI NATIVE ----
+# Comunico ad R di preferire tassativamente le funzioni di dplyr per evitare che 
+# pacchetti come MASS o terra sovrascrivano i comandi base bloccando lo script.
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
 
+# STATISTICA: Imposto i contrasti a somma zero (contr.sum). Questo passaggio è 
+# OBBLIGATORIO affinché car::Anova(type = "III") calcoli correttamente i p-value.
+options(contrasts = c("contr.sum", "contr.poly"))
 
-## ---- load data ----
+
+# ---- CONFIGURAZIONE DIRECTORY E CARICAMENTO FORZATO DATI ----
+# Definisco la cartella principale di lavoro sul PC
 setwd("C:/RTesi")
 
-{
-  specie <- readxl::read_xlsx(
-    "C:/RTesi/dati_ombrone_provvisori.xlsx",
-    sheet = "Contatti_Specie"
-  )
-  segmenti <- readxl::read_xlsx(
-    "C:/RTesi/dati_ombrone_provvisori.xlsx",
-    sheet = "Segmenti"
-  )
-}
+# Carico i fogli Excel specificando i percorsi assoluti
+specie  <- readxl::read_xlsx("C:/RTesi/dati_ombrone_provvisori.xlsx", sheet = "Contatti_Specie")
+segmenti <- readxl::read_xlsx("C:/RTesi/dati_ombrone_provvisori.xlsx", sheet = "Segmenti")
 
-## ---- data preparation ----
-{
-  # Filtriamo i segmenti del 2025
-  seg_2025 <- segmenti %>%
-    filter(ANNO == 2025)
 
-  # Filtriamo i contatti del 2025 e aggreghiamo per segmento (sommando le sponde)
-  # per avere il dato totale del segmento da confrontare tra i tre tratti
-  specie_2025 <- specie %>%
-    filter(ID_SEGMENTO %in% seg_2025$ID_SEGMENTO) %>%
-    group_by(ID_SEGMENTO, SPECIE) %>%
-    summarise(CONTEGGIO_TOT = sum(CONTEGGIO), .groups = "drop")
+# ---- PREPARAZIONE DEL DATASET AMBIENTALE E BIOLOGICO 2025 ----
+# Isolo tutte le unità campionarie campionate nell'anno corrente 2025
+seg_2025 <- segmenti %>%
+  filter(ANNO == 2025)
 
-  # Trasformiamo in formato WIDE (Siti x Specie) per il pacchetto vegan
-  matrice_comunita <- specie_2025 %>%
-    pivot_wider(
-      names_from = SPECIE,
-      values_from = CONTEGGIO_TOT,
-      values_fill = 0
-    ) %>%
-    column_to_rownames("ID_SEGMENTO")
-}
+# Filtro i contatti biologici associati esclusivamente ai segmenti del 2025
+specie_2025 <- specie %>%
+  filter(ID_SEGMENTO %in% seg_2025$ID_SEGMENTO) %>%
+  group_by(ID_SEGMENTO, SPECIE) %>%
+  # Sommo le sponde per ottenere il dato totale cumulativo del segmento
+  summarise(CONTEGGIO_TOT = sum(CONTEGGIO, na.rm = TRUE), .groups = "drop")
+
+# FORMATO WIDE: Trasformo il dataframe in una matrice "Siti x Specie" per il pacchetto vegan
+matrice_comunita <- specie_2025 %>%
+  pivot_wider(names_from = SPECIE, values_from = CONTEGGIO_TOT, values_fill = 0) %>%
+  column_to_rownames("ID_SEGMENTO")
+
+# CORREZIONE DATI AMBIENTALI: Forzo l'NDVI a numerico e ordiniamo i tratti in senso geografico
+seg_2025_corretto <- seg_2025 %>%
+  mutate(
+    NDVI = as.numeric(as.character(NDVI)),
+    NOME_TRATTO = factor(NOME_TRATTO, levels = c("Monte", "Tagli", "Valle"))
+  ) %>%
+  filter(!is.na(NDVI)) # Eliminiamo segmenti privi di dato telerilevato
 
 
 # =====================================================================
 # ---- TABELLA NDVI PER TRATTO (2025) ----
 # =====================================================================
 
-# Trasformo la colonna NDVI da "carattere" a "numerica" prima del calcolo
-seg_2025_corretto <- seg_2025 %>%
-  mutate(NDVI = as.numeric(as.character(NDVI))) 
-
-# Ricalcolo delle statistiche descrittive
+# Imposto i dati della tabella e ricalcolo le statistiche descrittive
 tabella_ndvi_dati <- seg_2025_corretto %>%
   group_by(NOME_TRATTO) %>%
   summarise(
     Numero_Segmenti = n(),
-    NDVI_Medio      = mean(NDVI, na.rm = TRUE),
-    Deviazione_Std  = sd(NDVI, na.rm = TRUE),
-    Minimo          = min(NDVI, na.rm = TRUE),
-    Massimo         = max(NDVI, na.rm = TRUE),
+    NDVI_Medio      = mean(NDVI),
+    Deviazione_Std  = sd(NDVI),
+    Minimo          = min(NDVI),
+    Massimo         = max(NDVI),
     .groups = "drop"
   )
 
-# Creo la tabella risolvendo il conflitto di 'align'
-# Uso flextable::align per dire a R di ignorare il pacchetto terra in questo blocco (altrimenti continua a dare errori di conflitto)
-
+# Impagino le statistiche descrittive formattando i numeri per i sistemi italiani
 tabella_completa <- flextable(tabella_ndvi_dati) %>%
   set_header_labels(
-    NOME_TRATTO     = "Tratto di Fiume",
-    Numero_Segmenti = "N° Segmenti",
-    NDVI_Medio      = "NDVI Medio",
-    Deviazione_Std  = "Deviazione Standard",
-    Minimo          = "Min",
-    Massimo         = "Max"
+    NOME_TRATTO = "Tratto di Fiume", Numero_Segmenti = "N° Segmenti",
+    NDVI_Medio = "NDVI Medio", Deviazione_Std = "Deviazione Standard",
+    Minimo = "Min", Massimo = "Max"
   ) %>%
-  # Rimuovo completamente i separatori delle migliaia per evitare conflitti con le impostazioni di sistema
-  # continuava a dari dei warning
+  # Arrotondo a 3 decimali impostando la virgola come separatore decimale e rimuovendo i punti delle migliaia
   colformat_double(digits = 3, decimal.mark = ",", big.mark = "") %>% 
   colformat_int(j = "Numero_Segmenti", big.mark = "") %>% 
   theme_booktabs() %>%                
@@ -220,97 +196,137 @@ tabella_completa <- flextable(tabella_ndvi_dati) %>%
   flextable::align(align = "center", part = "all") %>% 
   flextable::align(j = "NOME_TRATTO", align = "left", part = "all")
 
-
-# La esporto in word
-library(officer)
-doc_ndvi <- read_docx()
-doc_ndvi <- body_add_par(doc_ndvi, "Tabella: Statistiche descrittive dell'NDVI nei tre tratti monitorati (Anno 2025)", style = "heading 2")
-doc_ndvi <- body_add_flextable(doc_ndvi, value = tabella_completa)
-
+# Salvataggio del primo documento Word (Medie Descrittive)
+doc_ndvi <- read_docx() %>%
+  body_add_par("Tabella 1.1: Statistiche descrittive dell'NDVI nei tre tratti monitorati (Anno 2025)", style = "heading 2") %>%
+  body_add_flextable(value = tabella_completa)
 print(doc_ndvi, target = "C:/RTesi/tabella_medie_ndvi_2025.docx")
 print("--- TABELLA WORD GENERATA CON SUCCESSO ---")
 
 
-
 # =====================================================================
 # ---- ANOVA PER NDVI (2025) ----
-# =====================================================================
+# ====================================================================
 
+# ---- VERIFICA FORMALE DEGLI ASSUNTI STATISTICI ----
+# CostruSCo un modello lineare classico provvisorio per estrarre i residui da testare
 anova_NDVI <- lm(NDVI ~ NOME_TRATTO, data = seg_2025_corretto)
-print(summary(anova_NDVI))
 
+cat("\n--- DIAGNOSTICA: VERIFICA ASSUNTI ANOVA ---\n")
+# Test di Shapiro-Wilk: se p > 0.05 la distribuzione dei residui è normale
+print(shapiro.test(residuals(anova_NDVI))) 
 
-# verifica degli assunti dell'ANOVA: importante, da fare prima di guardare i risultati!
-# perché se gli assunti non sono rispettati dobbiamo passare al blocco di analisi successivo
-shapiro.test(residuals(anova_NDVI)) # p-value = 0.4603, è superiore a 0,05, significa che è i residui sono normali
+# OUTPUT
+#        Shapiro-Wilk normality test
+# data:  residuals(anova_NDVI)
+# W = 0.98443, p-value = 0.4603
 
-levene_S <- leveneTest(NDVI ~ NOME_TRATTO, data = seg_2025_corretto)
-print(levene_S) # p-value=0.005068 < p-vaue 0,05; quindi le varianze non sono omogenee
+# Test di Levene: se p < 0.05 le varianze sono eterogenee (violazione dell'omoschedasticità)
+print(leveneTest(NDVI ~ NOME_TRATTO, data = seg_2025_corretto))
 
-# DEVO USARE UN ALTRO MODELLO PER L'ANOVA
+# OUTPUT
+# Levene's Test for Homogeneity of Variance (center = median)
+#      Df F value   Pr(>F)   
+# group  2  5.6754 0.005068 **
+#      75                    
 
-# Imposto il modello "Generalized Linear Models"
+# ----  MODELLAZIONE STATISTICA AVANZATA (GLS PONDERATO) ----
+# Poiché Levene è risultato significativo (p = 0.005), applico il modello GLS.
+# Uso 'weights = varIdent' per consentire ad ogni tratto di avere la propria varianza, 
+# stabilizzando i residui e rendendo i p-value matematicamente inattaccabili.
 gls_ndvi <- gls(NDVI ~ NOME_TRATTO, 
-                        data = seg_2025_corretto, 
-                        weights = varIdent(form = ~ 1 | NOME_TRATTO))
+                data = seg_2025_corretto, 
+                weights = varIdent(form = ~ 1 | NOME_TRATTO))
 
-Anova(gls_ndvi, type = "III")
+cat("\n--- RISULTATI OBLIGATORI: ANOVA TIPO III (GLS) ---\n")
+print(car::Anova(gls_ndvi, type = "III"))
 
-# Calcolo dei confronti post-hoc di Tukey per varianze diverse
+# output
+# Response: NDVI
+#            Df   Chisq Pr(>Chisq)    
+# (Intercept)  1 6893.38  < 2.2e-16 ***
+# NOME_TRATTO  2  143.47  < 2.2e-16 ***
+
+
+# ---- CONTRASTI POST-HOC (TEST DI TUKEY) ED ESPORTAZIONE TABELLA  ----
+# Calcoliamo i confronti a coppie corretti con il metodo di Tukey per identificare le differenze locali
 confronti_posthoc <- emmeans(gls_ndvi, pairwise ~ NOME_TRATTO, adjust = "tukey")
-
-# VisualizzO i risultati dei contrasti a coppie
+cat("\n--- CONFRONTI A COPPIE (STIME DI TUKEY) ---\n")
 print(confronti_posthoc$contrasts)
 
-# OUTPUT p.value
-# Monte - Tagli   p.value <0.0001 < 0.05
-# Monte - Valle   p.value <0.0001 < 0.05
-# Tagli - Valle   p.value <0.0001 < 0.05
-
+# OUTPUT
+# contrast      estimate     SE   df t.ratio p.value
+# Monte - Tagli  -0.0706 0.0123 47.2  -5.719 <0.0001
+# Monte - Valle   0.1261 0.0158 43.5   7.962 <0.0001
+# Tagli - Valle   0.1966 0.0164 46.5  11.956 <0.0001
 
 # =====================================================================
-# CEAZIONE TABELLA
+#  -------------------- CREAZIONE TABELLA
 # =====================================================================
 
+# Trasformo i contrasti in un dataframe pulito per flextable
+df_contrasti <- as.data.frame(confronti_posthoc$contrasts) %>%
+  # Sostituiamo graficamente il trattino con "vs" per eleganza accademica
+  mutate(contrast = gsub(" - ", " vs ", contrast))
 
-# Trasformo l'oggetto emmeans in un dataframe pulito
-df_contrasti <- as.data.frame(confronti_posthoc$contrasts)
-
-#  Creo la tabella con flextable impostando i parametri anti-warning
+# RISOLUZIONE DEI WARNING: Per i sistemi italiani separo le migliaia con il punto (.) e i decimali con la virgola (,)
 tabella_word_contrasti <- flextable(df_contrasti) %>%
   set_header_labels(
-    contrast = "Confronto Tratti",
-    estimate = "Stima Diff.",
-    SE       = "Errore Standard (SE)",
-    df       = "g.l. (Satterthwaite)",
-    t.ratio  = "Valore t",
-    p.value  = "p-value"
+    contrast = "Confronto Tratti", estimate = "Stima Diff. (Δ)",
+    SE = "Errore Standard (SE)", df = "g.l. (Satterthwaite)",
+    t.ratio = "Valore t", p.value = "p-value"
   ) %>%
-  # big.mark = "" evita i conflitti con la virgola decimale nei sistemi italiani
-  colformat_double(digits = 4, decimal.mark = ",", big.mark = "") %>%
-  # Gestione specifica dei p-value  (< 0,0001)
+  colformat_double(j = c("estimate", "SE", "df", "t.ratio"), digits = 4, decimal.mark = ",", big.mark = ".") %>%
   colformat_double(j = "p.value", digits = 4, decimal.mark = ",", na_str = "") %>%
   theme_booktabs() %>%
   autofit() %>%
   bold(part = "header") %>%
+  # Evidenzio visivamente in grassetto le righe dei contrasti statisticamente significativi
+  bold(i = ~ p.value < 0.05, j = c("contrast", "p.value"), part = "body") %>%
   flextable::align(align = "center", part = "all") %>%
   flextable::align(j = "contrast", align = "left", part = "all")
 
-#  Creo un nuovo documento Word separato
-doc_contrasti <- read_docx()
-
-# Aggiungo il titolo del paragrafo/tabella
-doc_contrasti <- body_add_par(
-  doc_contrasti, 
-  "Tabella 1.2: Contrasti post-hoc di Tukey (metodo GLS) per i valori di NDVI (Anno 2025)", 
-  style = "heading 2"
-)
-
-# Inserisco la tabella appena creata
-doc_contrasti <- body_add_flextable(doc_contrasti, value = tabella_word_contrasti)
-
-# Salvo il file
+# Salvataggio del secondo documento Word (Tabella dei Contrasti Post-Hoc)
+doc_contrasti <- read_docx() %>%
+  body_add_par("Tabella 1.2: Contrasti post-hoc di Tukey (metodo GLS) per i valori di NDVI (Anno 2025)", style = "heading 2") %>%
+  body_add_flextable(value = tabella_word_contrasti)
 print(doc_contrasti, target = "C:/RTesi/tabella_contrasti_ndvi_2025.docx")
 
-print("--- FILE WORD SEPARATO GENERATO CON SUCCESSO IN C:/RTesi/tabella_contrasti_ndvi_2025.docx ---")
+# =============================================================================
+# ---- GRAFICO DI INTERAZIONE GENERATO DAL MODELLO (COLORBLIND-SAFE) ----
+# =============================================================================
 
+# Estraggo le medie marginali stimate dal modello GLS con i relativi intervalli di confidenza al 95%
+medie_grafico <- as.data.frame(emmeans(gls_ndvi, ~ NOME_TRATTO))
+
+# Elaborazione del grafico a linee di interazione temporale/spaziale
+grafico_interazione <- ggplot(medie_grafico, aes(x = NOME_TRATTO, y = emmean, group = 1, color = NOME_TRATTO)) +
+  # Disegno la linea di pendenza continua tra i tre transetti
+  geom_line(linewidth = 1.2, color = "gray40", alpha = 0.6) +
+  # Barre d'errore verticali che mostrano gli Intervalli di Confidenza reali (95%) stimati dal GLS
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.08, linewidth = 0.8) +
+  # Punti geometrici posizionati sulle medie (cerchi ad anima bianca per risaltare sullo sfondo)
+  geom_point(size = 4, stroke = 1.5, fill = "white", shape = 21) +
+  # PALETTE INCLUSIVA OKABE-ITO: Sostituiamo il rosso/blu con Arancione, Azzurro e Blu scuro.
+  # Questo garantisce la leggibilità assoluta a lettori affetti da daltonismo.
+  scale_color_manual(values = c("Monte" = "#E69F00", "Tagli" = "#56B4E9", "Valle" = "#0072B2")) +
+  scale_y_continuous(limits = c(0.3, 0.7), expand = c(0, 0)) +
+  labs(
+    title = "Gradiente spaziale e interazione dell'NDVI Medio (Anno 2025)",
+    subtitle = "Modello GLS ponderato - Intervalli di confidenza stabili al 95%",
+    x = "Tratto Fluviale Monitorato",
+    y = "NDVI Medio (Valori Stimati)",
+    color = "Tratto di Fiume"
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 13),
+    plot.subtitle = element_text(size = 10, face = "italic", hjust = 0.5, color = "gray30"),
+    legend.position = "none", # Nascondiamo la legenda superflua poiché i nomi sono già sull'asse X
+    axis.text = element_text(color = "black"),
+    axis.title = element_text(face = "bold"),
+    panel.grid.major.y = element_line(color = "gray95", linetype = "dashed")
+  )
+
+# Salvataggio grafico
+ggsave("C:/RTesi/Grafico_Interazione_NDVI_2025.png", plot = grafico_interazione, width = 6.5, height = 5, dpi = 300)
