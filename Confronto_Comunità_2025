@@ -592,7 +592,12 @@ summary(modello_beta_j)
   print(posthoc_pielou$contrasts)
 }
 
-# Non sembrano esserci differenze significative
+# OUTPUT
+#  contrast      estimate     SE  df z.ratio p.value
+# Monte - Tagli -0.01312 0.0106 Inf  -1.240  0.4296
+# Monte - Valle -0.01442 0.0128 Inf  -1.127  0.4971
+# Tagli - Valle -0.00131 0.0159 Inf  -0.082  0.9963
+
 
 
 # =====================================================================
