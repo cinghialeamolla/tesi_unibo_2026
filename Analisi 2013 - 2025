@@ -3,20 +3,19 @@
 # =====================================================================
 
 # ----  CARICAMENTO LIBRERIE ----
-library(tidyverse) # Per la manipolazione dei dati (dplyr, ggplot2, tidyr)
-library(readxl)    # Per leggere i file Excel nativi
-library(vegan)     # Per il calcolo degli indici ecologici (Rarificazione e Shannon)
-library(car) # per il test di Levene (omogeneità delle varianze)
-library(MASS) # per glm.nb()
-library(emmeans) # per i confronti post-hoc dei GLM
-library(flextable) # Per la creazione di tabelle eleganti per Word
-library(officer)   # Per l'esportazione diretta dei documenti in Word
-library(ggplot2) # per i plot dei grafici
-library(dplyr)
-library(tidyr)
-library(nlme)
-library(betareg)  # per Regressione beta
+# ----  CARICAMENTO LIBRERIE ----
 
+library(tidyverse) # Include 'dplyr' (gestione tabelle), 'tidyr' (strutturazione), 'ggplot2' (grafici)
+library(readxl)    # Caricamento di file Excel (.xlsx)
+library(vegan)     # Pacchetto standard per indici di diversità, rarificazione e analisi multivariate
+library(nlme)      # Modelli GLS (Generalized Least Squares) essenziali per gestire le varianze diverse tra gli anni 
+library(car)       # Per eseguire l'ANOVA di Tipo III sui modelli complessi (funzione Anova)
+library(emmeans)   # Gestione dei contrasti post-hoc (es. test di Tukey) dopo i modelli statistici
+library(flextable) # Consente di trasformare le tabelle di R in tabelle eleganti per pubblicazioni scientifiche
+library(officer)   # Permette ad R di scrivere e salvare direttamente file in formato Microsoft Word (.docx)
+
+library(MASS) # per glm.nb()
+library(betareg)  # per Regressione beta
 
 
 #   IMPOSTAZIONE CARTELLA E CARICAMENTO FORZATO DEI DATI
@@ -246,8 +245,6 @@ doc_ornito <- read_docx() %>%
 print(doc_ornito, target = "Tabella_Risultati_Comunita_Ornitica.docx")
 print("--> Tabella Word ornitologica salvata con successo!")
 
-# Organizzazione dei dati reali in formato lungo ("tidy") per ggplot2
-dati_grafico_fauna  Grafico di sintesi biologica salvato con successo in C:/RTesi/grafico_confronto_popolamento_ornitico.png")
 
 # =====================================================================
 # GRAFICO SERIE STORICA
