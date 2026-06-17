@@ -111,44 +111,43 @@ dati_grafico_long <- dati_wilcoxon_wide %>%
   mutate(Sponda = factor(Sponda, levels = c("integra", "tagliata"), labels = c("Sponda Integra", "Sponda Tagliata")))
 
 grafico_sponde_appaiate <- ggplot(dati_grafico_long, aes(x = Sponda, y = Ricchezza, fill = Sponda)) +
-  geom_line(aes(group = ID_SEGMENTO), color = "gray75", linewidth = 0.5, linetype = "solid") +
-  geom_boxplot(alpha = 0.3, width = 0.3, color = "gray40", outlier.shape = NA, show.legend = FALSE) +
-  geom_point(aes(color = Sponda), size = 3, alpha = 0.8, shape = 21, color = "black", show.legend = FALSE) +
+  geom_line(aes(group = ID_SEGMENTO), color = "gray80", linewidth = 0.5, linetype = "solid") +
+  geom_boxplot(alpha = 0.4, width = 0.3, color = "gray30", outlier.shape = NA, show.legend = FALSE) +
+  geom_point(size = 3.5, alpha = 0.85, shape = 21, color = "black", show.legend = FALSE) +
+
+  # PALETTE INCLUSIVA OKABE-ITO: Azzurro Cielo (Integra) vs Vermiglio/Arancio scuro (Tagliata)
+  #scale_fill_manual(values = c("Sponda Integra" = "#56B4E9", "Sponda Tagliata" = "#D55E00")) +
   scale_fill_manual(values = c("Sponda Integra" = "#66c2a5", "Sponda Tagliata" = "#fc8d62")) +
-  
+
+# Annotazioni statistiche in nero puro per garantire la massima leggibilità
   annotate("path", x = c(1, 1, 2, 2), y = c(12.5, 12.8, 12.8, 12.5), color = "gray30", linewidth = 0.5) +
-  annotate("text", x = 1.5, y = 13.2, label = "p < 0,001 ***", size = 4.5, fontface = "bold", color = "firebrick") +
+  annotate("text", x = 1.5, y = 13.3, label = "p < 0,001 ***", size = 4.5, fontface = "bold", color = "black") +
   
   labs(
     title = "Impatto Micro-Ambientale del Taglio della Vegetazione",
     subtitle = "Confronto appaiato della ricchezza ornitica tra le sponde dello stesso segmento (T3 - 2025)",
     x = "Tipologia di Sponda Orografica",
     y = "Numero di Specie per Sponda (Ricchezza S)",
-    # str_wrap spezza la frase a 65 caratteri per mandarla a capo in modo pulito
-    caption = str_wrap("Le linee grigie collegano le due sponde appartenenti alla medesima unità campionaria (ID_SEGMENTO).", width = 65)
+    caption = str_wrap("Le linee grigie collegano le due sponde appartenenti alla medesima unità campionaria (ID_SEGMENTO).", width = 75)
   ) +
-  scale_y_continuous(limits = c(0, 16), breaks = seq(0, 16, 2)) +
+  scale_y_continuous(limits = c(0, 15), breaks = seq(0, 14, 2), expand = c(0,0)) +
   theme_classic(base_size = 14) +
   theme(
-    plot.title = element_text(face = "bold", hjust = 0.5),
-    plot.subtitle = element_text(size = 11, color = "gray30", hjust = 0.5, margin = margin(b = 15)),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 13),
+    plot.subtitle = element_text(size = 10, face = "italic", color = "gray30", hjust = 0.5, margin = margin(b = 15)),
     axis.text.x = element_text(face = "bold", color = "black"),
-    panel.grid.major.y = element_line(color = "gray95"),
-    
-    # MODIFICA CHIAVE: Allinea la caption a sinistra (0) e imposta l'andata a capo automatica
+    axis.text.y = element_text(color = "black"),
+    panel.grid.major.y = element_line(color = "gray95", linetype = "dashed"),
     plot.caption = element_text(size = 10, face = "italic", color = "dimgray", hjust = 0, lineheight = 1.2, margin = margin(t = 15)),
-    
-    # MODIFICA CHIAVE: Aggiunge un margine vuoto di sicurezza sul fondo (b = 20) per non tagliare il testo
     plot.margin = margin(t = 10, r = 10, b = 20, l = 10, unit = "pt")
   )
 
 # Mostra a schermo per controllo
 print(grafico_sponde_appaiate)
 
-# MODIFICA CHIAVE: Aumentiamo l'altezza da 6.2 a 6.8 pollici per dare respiro al testo in basso
+# Esportazione dell'immagine per la tesi
 ggsave("C:/RTesi/grafico_sponde_appaiate_T3.png", plot = grafico_sponde_appaiate, width = 7.5, height = 6.8, dpi = 300)
 print("--- GRAFICO RIGENERATO CON CAPTION COMPLETA ---")
-
 
 
 ###====================================================================
