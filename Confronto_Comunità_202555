@@ -9,35 +9,20 @@
 # A quel punto, useremo i modelli lineari inserendo NOME_TRATTO come fattore a 3 livelli
 # (e eventualmente l'NDVI come covariata, o altre covariate).
 
-## ---- packages ----
-#  install.packages("tidyverse")
-#  install.packages("readxl")
-#  install.packages("vegan")
-#  install.packages("car")
-#  install.packages("MASS")
-#  install.packages("emmeans")
-#  install.packages("patchwork")
-#  install.packages("ggdist")
-#  install.packages("GGally")
-#  install.packages("flextable")
-
 {
-  library(readxl)
-  library(vegan) # per il calcolo degli indici ecologici
-  library(car) # per il test di Levene (omogeneità delle varianze)
+  library(tidyverse) # Include 'dplyr' (gestione tabelle), 'tidyr' (strutturazione), 'ggplot2' (grafici)
+  library(readxl)    # Caricamento di file Excel (.xlsx)
+  library(vegan)     # Pacchetto standard per indici di diversità, rarificazione e analisi multivariate
+  library(nlme)      # Modelli GLS (Generalized Least Squares) essenziali per gestire le varianze diverse tra gli anni 
+  library(car)       # Per eseguire l'ANOVA di Tipo III sui modelli complessi (funzione Anova)
+  library(emmeans)   # Gestione dei contrasti post-hoc (es. test di Tukey) dopo i modelli statistici
+  library(flextable) # Consente di trasformare le tabelle di R in tabelle eleganti per pubblicazioni scientifiche
+  library(officer)   # Permette ad R di scrivere e salvare direttamente file in formato Microsoft Word (.docx)
+
   library(MASS) # per glm.nb()
-  library(tidyverse)
-  library(emmeans) # per i confronti post-hoc dei GLM
-  library(dplyr)
-  library(flextable)  # il mago delle tabelle
-  library(dplyr)
-  library(officer)
   library(patchwork)
-  library(nlme)
   library(ggdist)
   library(betareg)
-  library(officer)
-  library(ggplot2)  # per i vari grafici
   library(Hmisc)
   library(broom)
   library(stringr)
@@ -45,9 +30,15 @@
 }
 
 # Ho dovuto risolvere un probema di conflitto tra pacchetti istallati sul mio R
+# Ho sfruttato il pacchetto 'conflicted' per bloccare sul nascere le interferenze.
+# Molti pacchetti caricati (MASS, Hmisc) hanno funzioni con nomi identici: 
+# forzo R a usare sempre i comandi di 'dplyr' per garantire la stabilità dei filtri.
 library(conflicted)
 conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
+conflict_prefer("summarize", "dplyr")
+conflict_prefer("summarise", "dplyr")
+
 
 
 ## ---- load data ----
@@ -64,24 +55,9 @@ setwd("C:/RTesi")
   )
 }
 
-## ------- controllo dati-----
-# Verifico se ci sono ID nel foglio specie che non esistono nel foglio segmenti
-
-id_orfani <- anti_join(specie, segmenti, by = "ID_SEGMENTO")
-
-if(nrow(id_orfani) > 0) {
-  print("Attenzione: Ci sono ID nei contatti che non esistono nei segmenti!")
-  print(unique(id_orfani$ID_SEGMENTO))
-} else {
-  print("Tutti gli ID dei contatti sono coerenti con il foglio Segmenti.")
-}
-# OUTPUT:   "Tutti gli ID dei contatti sono coerenti con il foglio Segmenti."
-# Ora posso procedere
-
-
 ## ---- data preparation ----
 {
-  # Filtro i segmenti del 2025
+  # Filtriamo i segmenti del 2025
   seg_2025 <- segmenti %>%
     filter(ANNO == 2025)
   
@@ -119,7 +95,6 @@ seg_2025_corretto <- seg_2025 %>%
     Evenness_J = Shannon_H / log(Ricchezza_S) # Pielou J
   )
 }
-
 
 # Uniamo gli indici alle informazioni ambientali dei segmenti
 dataset_analisi_1 <- seg_2025 %>%
@@ -174,52 +149,52 @@ ft <- flextable(tabella_riassuntiva_formattata) |>
 # Salva il file
 save_as_docx(ft, path = "tabella_tratti-2025.docx")
 
+# =========================================================================
+# -------------------AGGIUNGERE GRAFICO
+# =========================================================================
 
-# AGGIUNGERE GRAFICO
-
-library(ggplot2)
-
-# Grafico tre parametri
-
-# 1. Preparoo il dataframe
+# Preparazione del dataframe
 dati_lunghi <- tabella_riassuntiva %>%
-  # Ordino i tratti lungo l'asta del fiume
+  # Ordiniamo i tratti lungo l'asta del fiume
   mutate(NOME_TRATTO = factor(NOME_TRATTO, levels = c("Valle", "Monte", "Tagli"))) %>%
-  # Selezion solo le colonne utili
+  # Selezioniamo solo le colonne utili
   select(NOME_TRATTO, S_media, S_dev_std, H_media, H_dev_std, J_media, J_dev_std) %>%
-  # Trasformo in formato long sia le medie che le deviazioni standard
+  # Trasformiamo in formato long unificando i pattern delle colonne
   pivot_longer(
     cols = -NOME_TRATTO,
     names_to = c("Indice", ".value"),
     names_pattern = "(.*)_(media|dev_std)"
   ) %>%
-  # Rinomino gli indici per i titoli dei riquadri (facet)
+  # Rinominiamo gli indici per i titoli dei riquadri (facet)
   mutate(Indice = factor(Indice, 
                          levels = c("S", "H", "J"),
                          labels = c("Ricchezza (S)", "Shannon (H')", "Evenness (J')")))
 
-# 2. Codice grafico
+# Codice grafico 
 ggplot(dati_lunghi, aes(x = NOME_TRATTO, y = media, group = 1)) +
   # Disego le linee tra i punti
-  geom_line(color = "#3b528b", linewidth = 1) +
-  # Aggiungo le barre di errore sotto i punti
+  geom_line(color = "gray40", linewidth = 1) +
+ # Aggiungo le barre di errore sotto i punti
   geom_errorbar(aes(ymin = media - dev_std, ymax = media + dev_std), 
-                width = 0.1, color = "black", linewidth = 0.6) +
+                width = 0.12, color = "black", linewidth = 0.6) +
   # Disegno i punti colorati sopra le linee
   geom_point(aes(color = NOME_TRATTO), size = 4, show.legend = FALSE) +
   facet_wrap(~Indice, scales = "free_y") +
+  # Palette Viridis
   scale_color_viridis_d(option = "viridis", begin = 0.2, end = 0.8) +
   labs(
     title = "Andamento degli Indici di Biodiversità nei Tratti",
-    x = "Tratto",
+    x = "Tratto Fluviale",
     y = "Valore Medio ± Dev.Std."
   ) +
-  theme_minimal(base_size = 13) +
+  theme_classic(base_size = 13) + # Stile 
   theme(
     strip.text = element_text(face = "bold", size = 11),
-    strip.background = element_rect(fill = "gray95", color = NA),
-    plot.title = element_text(face = "bold", hjust = 0.5)
+    strip.background = element_rect(fill = "gray95", color = "gray80"),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    axis.text = element_text(color = "black")
   )
+
 
 ggsave("grafico_biodiversita_completo.png", width = 11, height = 5, dpi = 300)
 
@@ -288,11 +263,14 @@ options(contrasts = c("contr.treatment", "contr.poly"))
 # COSTRUZIONE TABELLA ANCOVA SHANNON DI TIPO III
 # ==============================================================================
 
+# Imposto i contrasti ortogonali obbligatori per il Tipo III
+options(contrasts = c("contr.sum", "contr.poly"))
+modello_H_lineare <- lm(Shannon_H ~ NOME_TRATTO + NDVI, data = dataset_analisi_1)
 
 # Salvo l'output del test di Tipo III in un oggetto tabella
-ancova_tipo3 <- Anova(modello_H_lineare, type = "III")
+ancova_tipo3 <- car::Anova(modello_H_lineare, type = "III")
 
-# Trasformo l'oggetto in un dataframe pulito includendo i Residui
+# Trasformo l'oggetto in un dataframe risolvendo i nomi delle colonne di car::Anova
 dati_tabella_h <- as.data.frame(ancova_tipo3) %>%
   rownames_to_column(var = "Sorgente") %>%
   mutate(Sorgente = case_when(
@@ -302,25 +280,21 @@ dati_tabella_h <- as.data.frame(ancova_tipo3) %>%
     Sorgente == "Residuals"   ~ "Residui",
     TRUE ~ Sorgente
   )) %>%
-  # Calcolo il Quadrato Medio (MS) che manca nell'output di Anova()
+  # Calcolo sicuro usando i nomi esatti delle colonne di lm
   mutate(MS = `Sum Sq` / Df) %>%
-  # Riordino le colonne per il layout classico
   select(Sorgente, Df, SS = `Sum Sq`, MS, F_val = `F value`, p_val = `Pr(>F)`)
 
 # Costruzione della flextable con funzioni native aggiornate
 tabella_h <- flextable(dati_tabella_h) %>%
   set_header_labels(
-    Sorgente = "Sorgente di Variazione",
-    Df       = "g.l. (Df)",
-    SS       = "Somma Quadrati (SS)",
-    MS       = "Quadrato Medio (MS)",
-    F_val    = "Valore F",
-    p_val    = "p-value"
+    Sorgente = "Sorgente di Variazione", Df = "g.l. (Df)",
+    SS = "Somma Quadrati (SS)", MS = "Quadrato Medio (MS)",
+    F_val = "Valore F", p_val = "p-value"
   ) %>%
-  # Formattazione per le colonne dei calcoli statistici
+ # Formattazione per le colonne dei calcoli statistici
   colformat_double(j = c("SS", "MS", "F_val"), digits = 3, decimal.mark = ",", big.mark = "", na_str = "") %>%
   colformat_int(j = "Df", big.mark = "") %>%
-  # Formattazione nativa dei p-value: arrotonda a 4 decimali e gestisce gli NA dei residui
+ # Formattazione nativa dei p-value: arrotonda a 4 decimali e gestisce gli NA dei residui
   colformat_double(j = "p_val", digits = 4, decimal.mark = ",", big.mark = "", na_str = "") %>%
   theme_booktabs() %>%
   autofit() %>%
@@ -329,16 +303,16 @@ tabella_h <- flextable(dati_tabella_h) %>%
   flextable::align(j = "Sorgente", align = "left", part = "all")
 
 #  Creo il documento Word e salvo
-doc_tabella_h <- read_docx()
-doc_tabella_h <- body_add_par(
-  doc_tabella_h, 
-  "Tabella h - Analisi della Covarianza (ANCOVA) di Tipo III per l'indice di Diversità di Shannon (H') della comunità ornitica (Anno 2025).", 
-  style = "Normal"
-)
-doc_tabella_h <- body_add_flextable(doc_tabella_h, value = tabella_h)
+doc_tabella_h <- read_docx() %>%
+  body_add_par("Tabella h - Analisi della Covarianza (ANCOVA) di Tipo III per l'indice di Diversità di Shannon (H') della comunità ornitica (Anno 2025).", style = "Normal") %>%
+  body_add_flextable(value = tabella_h)
 
 print(doc_tabella_h, target = "C:/RTesi/Tabella_h_ANCOVA_Shannon_Reale.docx")
 print("--- TABELLA h REALE DI TIPO III GENERATA IN WORD CON SUCCESSO ---")
+
+# Ripristino i contrasti standard per i blocchi successivi
+options(contrasts = c("contr.treatment", "contr.poly"))
+
 
 # ==============================================================================
 # ANOVA sull'Indice di Evenness includendo l'NDVI come covariata (ANCOVA)
@@ -408,7 +382,6 @@ cat("\nRatio di dispersione:", ratio_dispersione, "\n")
   if (ratio_dispersione > 1.3) {
     # --- CASO A: SOVRADISPERSIONE -> NEGATIVE BINOMIAL ---
     print("--- RILEVATA SOVRADISPERSIONE: Eseguo il GLM Binomiale Negativa ---")
-    
     glm_ricchezza_finale <- glm.nb(
       Ricchezza_S ~ NOME_TRATTO + NDVI,
       data = dataset_analisi_1
@@ -459,16 +432,15 @@ print(confronti_tratti$contrasts)
 # COSTRUZIONE TABELLA COEFFICIENTI GLM QUASIPOISSON
 # =====================================================================
 
-library(tidyverse)
-library(broom)
-library(flextable)
-library(officer)
+# Forza R a usare i contrasti standard per mantenere i nomi reali (Monte, Tagli, Valle)
+options(contrasts = c("contr.treatment", "contr.poly"))
 
-# =====================================================================
+# Ricalcoloil modello per pulire i nomi dei coefficienti
+glm_ricchezza_tabella <- glm(Ricchezza_S ~ NOME_TRATTO + NDVI, family = quasipoisson(link = "log"), data = dataset_analisi_1)
+
 # ESTRAZIONE E PREPARAZIONE DATI
-# =====================================================================
-
-dati_S <- tidy(glm_ricchezza_finale) %>%
+# Mandato a capo il codice unito che generava il blocco
+dati_S <- broom::tidy(glm_ricchezza_tabella) %>%
   mutate(term = case_when(
     term == "(Intercept)" ~ "Intercetta (Monte)",
     term == "NOME_TRATTOTagli" ~ "Tratto: Tagli",
@@ -476,7 +448,7 @@ dati_S <- tidy(glm_ricchezza_finale) %>%
     term == "NDVI" ~ "NDVI (Covariata)",
     TRUE ~ term
   )) %>%
-  # Aggiungo la colonna per i simboli di significatività (stelline)
+ # Aggiungo la colonna per i simboli di significatività (stelline)
   mutate(
     Signif = case_when(
       p.value < 0.001 ~ "***",
@@ -484,12 +456,11 @@ dati_S <- tidy(glm_ricchezza_finale) %>%
       p.value < 0.05  ~ "*",
       TRUE            ~ "NS"
     ),
-    # Arrotondo il p-value per visualizzarlo in modo pulito
+ # Arrotondo il p-value per visualizzarlo in modo pulito
     p.value = if_else(p.value < 0.001, "< 0,001", as.character(round(p.value, 4)))
   ) %>%
-  # Seleziono le colonne
+ # Seleziono le colonne
   select(term, estimate, std.error, statistic, p.value, Signif)
-
 
 ft_S <- flextable(dati_S) %>%
   # Rinomino i titoli delle colonne in italiano
@@ -511,18 +482,18 @@ ft_S <- flextable(dati_S) %>%
   flextable::align(align = "center", part = "all") %>% 
   flextable::align(j = "term", align = "left", part = "all")
 
-doc_S <- read_docx()
 
-# Inserisco il titolo descrittivo richiesto
-doc_S <- body_add_par(doc_S, "Tabella 1: Risultati del Modello Lineare Generalizzato (GLM Quasipoisson) sulla Ricchezza di specie (S) per l'anno 2025.", style = "Normal")
-
+doc_S <- read_docx() %>%
+# Inserisco il titolo descrittivo
+  body_add_par("Tabella x: Risultati del Modello Lineare Generalizzato (GLM Quasipoisson) sulla Ricchezza di specie (S) per l'anno 2025.", style = "Normal") %>%
 # Inserisco la tabella
-doc_S <- body_add_flextable(doc_S, value = ft_S)
+  body_add_flextable(value = ft_S)
 
-# Salvo il file Word nella cartella della tua tesi
-print(doc_S, target = "C:/RTesi/tabella_1_ricchezza_S_2025.docx")
 
-print("--- TABELLA 1 WORD GENERATA CON SUCCESSO ---")
+# Salvo il file Word nella cartella
+print(doc_S, target = "C:/RTesi/tabella_x_ricchezza_S_2025.docx")
+
+print("--- TABELLA x WORD GENERATA CON SUCCESSO ---")
 
 
 
@@ -576,7 +547,6 @@ print("--- TABELLA 1 WORD GENERATA CON SUCCESSO ---")
   posthoc_shannon <- emmeans(lm_shannon, specs = pairwise ~ NOME_TRATTO)
   print(posthoc_shannon$contrasts)
 }
-
 
 # Monte - Tagli    p-value   0.6097
 # Monte - Valle    p-value  0.9961
@@ -653,27 +623,26 @@ dati_tabella_j <- tibble(
                  matrice_coeff["NDVI", "Pr(>|z|)"])
 )
 
-# ostruzione e formattazione
+# Costruzione e formattazione dei dati_tabella_j originali
 tabella_j_word <- flextable(dati_tabella_j) %>%
   set_header_labels(
-    Parametro  = "Parametro",
-    Stima      = "Stima (Coef.)",
-    Err_Std    = "Err. Std.",
-    Statistica = "Statistica (z)",
-    p_value    = "p-value"
+    Parametro  = "Parametro", Stima = "Stima (Coef.)",
+    Err_Std    = "Err. Std.", Statistica = "Statistica (z)", p_value    = "p-value"
   ) %>%
-  # Arrotondamento e sostituzione del punto con la virgola (evita ogni warning)
-  colformat_double(j = c("Stima", "Err_Std", "Statistica"), digits = 3, decimal.mark = ",", big.mark = "") %>%
-  colformat_double(j = "p_value", digits = 4, decimal.mark = ",", big.mark = "") %>%
-  # Sostituzione formale dei p-value estremamente piccoli (es. l'Intercetta che è <0.0001)
-  labelizor(j = "p_value", labels = c("0.0000" = "< 0,0001"), part = "body") %>%
+  # Applico la formattazione dei decimali
+  colformat_double(j = c("Stima", "Err_Std", "Statistica"), digits = 3, decimal.mark = ",") %>%
+  # Blocco il p-value a 4 decimali con la virgola
+  colformat_double(j = "p_value", digits = 4, decimal.mark = ",") %>%
+  # Labelizor intercetta la stringa esatta generata dal sistema italiano ("0,0000")
+  labelizor(j = "p_value", labels = c("0,0000" = "< 0,0001"), part = "body") %>%
   theme_booktabs() %>%
   autofit() %>%
   bold(part = "header") %>%
   flextable::align(align = "center", part = "all") %>%
   flextable::align(j = "Parametro", align = "left", part = "all")
 
-# 3Esportoe nel documento Word dedicato
+
+# Esporto nel documento Word dedicato
 doc_tabella_j <- read_docx()
 
 # Titolo ufficiale della tabella
