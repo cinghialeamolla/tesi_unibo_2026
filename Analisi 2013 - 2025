@@ -302,12 +302,8 @@ if(length(specie_nuove) > 0) {
 
 
 
-
-
-
-
 # =====================================================================
-# BLOCCO 1: GLM UNIVARIATO SULLA RICCHEZZA DEI SEGMENTI (T1 & T2)
+# GLM UNIVARIATO SULLA RICCHEZZA DEI SEGMENTI (T1 & T2)
 # =====================================================================
 
 # Isolo i segmenti storici puri (T1 e T2) per entrambi gli anni
@@ -534,52 +530,145 @@ print(doc_perm, target = "C:/RTesi/Tabella_PERMANOVA_Comunita.docx")
 print("--> SUCCESS: Tabella PERMANOVA salvata correttamente in Word!")
 
 # =====================================================================
-# BLOCCO 2: ANALISI DEL TURNOVER DELLA COMUNITÀ (INDICE DI JACCARD)
+# ANALISI DEL TURNOVER DELLA COMUNITÀ (INDICE DI JACCARD)
 # =====================================================================
 
+# Creo un dataset biologico filtrato sui segmenti storici corretti
+dati_storici_jaccard <- specie %>%
+  inner_join(segmenti, by = "ID_SEGMENTO") %>%
+  filter(NOME_TRATTO %in% c("Monte", "Valle") & CONTEGGIO > 0)
 
-# 1. Estraiamo la lista delle sole specie realmente contattate nei due periodi storici
-specie_2013_unique <- specie %>%
-  inner_join(filter(segmenti, ANNO == 2013 & NOME_TRATTO %in% tratti_storici), by = "ID_SEGMENTO") %>%
-  pull(SPECIE) %>% unique()
+# Estraggo le liste di specie uniche per il tratto MONTE
+specie_Monte_2013 <- dati_storici_jaccard %>% filter(NOME_TRATTO == "Monte" & ANNO == 2013) %>% pull(SPECIE) %>% unique()
+specie_Monte_2025 <- dati_storici_jaccard %>% filter(NOME_TRATTO == "Monte" & ANNO == 2025) %>% pull(SPECIE) %>% unique()
 
-specie_2025_unique <- specie %>%
-  inner_join(filter(segmenti, ANNO == 2025 & NOME_TRATTO %in% tratti_storici), by = "ID_SEGMENTO") %>%
-  pull(SPECIE) %>% unique()
+# Estraggo le liste di specie uniche per il tratto VALLE
+specie_Valle_2013 <- dati_storici_jaccard %>% filter(NOME_TRATTO == "Valle" & ANNO == 2013) %>% pull(SPECIE) %>% unique()
+specie_Valle_2025 <- dati_storici_jaccard %>% filter(NOME_TRATTO == "Valle" & ANNO == 2025) %>% pull(SPECIE) %>% unique()
 
-# 2. Computazione degli elementi matematici dell'Indice di Jaccard
-comuni <- intersect(specie_2013_unique, specie_2025_unique) # Intersezione (A ∩ B)
-perse  <- setdiff(specie_2013_unique, specie_2025_unique)   # Esclusive 2013 (Estinte localmente)
-nuove  <- setdiff(specie_2025_unique, specie_2013_unique)   # Esclusive 2025 (Nuove colonizzazioni)
+# Diagnostica rapida: verifico il numero di specie nei pool
+cat("Specie Monte 2013:", length(specie_Monte_2013), " | 2025:", length(specie_Monte_2025), "\n")
+# Specie Monte 2013: 30  | 2025: 39
+cat("Specie Valle 2013:", length(specie_Valle_2013), " | 2025:", length(specie_Valle_2025), "\n")
+# Specie Valle 2013: 30  | 2025: 40 
 
-# Formule classiche della diversità Beta
-jaccard_sim <- length(comuni) / length(union(specie_2013_unique, specie_2025_unique))
-turnover    <- 1 - jaccard_sim
 
-# 3. Strutturazione del Dataframe riassuntivo per la tesi
-tabella_jaccard <- data.frame(
-  Metrica = c("Similarità di Jaccard (Condivisione specie)", 
-              "Turnover di Jaccard (Dissimilarità temporale)", 
-              "Pool Specie Totali - Anno 2013", 
-              "Pool Specie Totali - Anno 2025", 
-              "Specie storiche non ricontattate (Perse)", 
-              "Nuove specie campionate nel 2025 (Acquisite)"),
-  Valore = c(round(jaccard_sim, 3), 
-             round(turnover, 3), 
-             length(specie_2013_unique), 
-             length(specie_2025_unique), 
-             length(perse), 
-             length(nuove))
+# ---- CALCOLI PER IL TRATTO MONTE ----
+comuni_M   <- intersect(specie_Monte_2013, specie_Monte_2025)
+perse_M    <- setdiff(specie_Monte_2013, specie_Monte_2025)
+nuove_M    <- setdiff(specie_Monte_2025, specie_Monte_2013)
+jacc_sim_M <- length(comuni_M) / length(union(specie_Monte_2013, specie_Monte_2025))
+turnover_M <- 1 - jacc_sim_M
+
+# ---- CALCOLI PER IL TRATTO VALLE ----
+comuni_V   <- intersect(specie_Valle_2013, specie_Valle_2025)
+perse_V    <- setdiff(specie_Valle_2013, specie_Valle_2025)
+nuove_V    <- setdiff(specie_Valle_2025, specie_Valle_2013)
+jacc_sim_V <- length(comuni_V) / length(union(specie_Valle_2013, specie_Valle_2025))
+turnover_V <- 1 - jacc_sim_V
+
+# ---- COSTRUZIONE DEL DATAFRAME COMPARATIVO FINALE ----
+tabella_jaccard_confronto <- data.frame(
+  Parametro_Ecologico = c(
+    "Pool Specie Totali (Anno 2013)", 
+    "Pool Specie Totali (Anno 2025)", 
+    "Specie stabili / Condivise (Intersezione)", 
+    "Specie storiche non ricontattate (Perse)", 
+    "Nuove specie campionate nel 2025 (Acquisite)",
+    "Indice di Similarità di Jaccard", 
+    "Turnover di Jaccard (Dissimilarità temporale)"
+  ),
+  Tratto_Monte = c(length(specie_Monte_2013), length(specie_Monte_2025), length(comuni_M), length(perse_M), length(nuove_M), round(jacc_sim_M, 3), round(turnover_M, 3)),
+  Tratto_Valle = c(length(specie_Valle_2013), length(specie_Valle_2025), length(comuni_V), length(perse_V), length(nuove_V), round(jacc_sim_V, 3), round(turnover_V, 3))
 )
 
-# 4. Formattazione accademica elegante con flextable per Word
-tab_finale <- flextable(tabella_jaccard) %>%
-  set_header_labels(Metrica = "Parametro Ecologico di Diversità Beta", Valore = "Valore") %>%
-  theme_vanilla() %>%
+# MostrA la tabella preliminare
+print(tabella_jaccard_confronto)
+
+# =======================================================================================
+#      TABELLA JACCARD
+# =======================================================================================
+
+ft_jaccard <- flextable(tabella_jaccard_confronto) %>%
+  set_header_labels(
+    Parametro_Ecologico = "Parametro di Diversità Beta (2013 vs 2025)",
+    Tratto_Monte = "Tratto Monte (T1)",
+    Tratto_Valle = "Tratto Valle (T2)"
+  ) %>%
+  theme_booktabs() %>%
   bold(part = "header") %>%
-  align(j = "Valore", align = "center", part = "all") %>%
+  # Mettiamo in evidenza le righe conclusive degli indici sintetici
+  bold(i = c(6, 7), part = "body") %>%
+  align(align = "center", part = "all") %>%
+  align(j = "Parametro_Ecologico", align = "left", part = "all") %>%
   autofit()
 
-# Mostra l'anteprima visiva della tabella in RStudio
-tab_finale
+# Scrittura del file Word su disco
+doc_jaccard <- read_docx() %>%
+  body_add_par("Tabella XX - Analisi del turnover temporale della comunità ornitica nidificante tramite Indice di Jaccard.", style = "Normal") %>%
+  body_add_flextable(ft_jaccard)
 
+print(doc_jaccard, target = "C:/RTesi/Tabella_Turnover_Jaccard.docx")
+cat("--> SUCCESS: Tabella Jaccard salvata correttamente in C:/RTesi\n")
+
+
+
+# =======================================================================================
+#      GRAFICO JACCARD
+# =======================================================================================
+
+# Costruisco il dataset specifico per i flussi biologici delle specie
+dati_flusso_specie <- data.frame(
+  Tratto = factor(c("Monte", "Monte", "Monte", "Valle", "Valle", "Valle"), 
+                  levels = c("Monte", "Valle")),
+  Categoria = factor(c("Specie Nuove (Acquisite)", "Specie Stabili (Condivise)", "Specie Perse (Estinte locali)",
+                       "Specie Nuove (Acquisite)", "Specie Stabili (Condivise)", "Specie Perse (Estinte locali)"),
+                     levels = c("Specie Nuove (Acquisite)", "Specie Stabili (Condivise)", "Specie Perse (Estinte locali)")),
+  # InseriSCo i valori reali: le specie perse sono negative per orientarle verso il basso
+  Numero_Specie = c(11, 28, -2,  # Dati Tratto Monte
+                    13, 27, -3)  # Dati Tratto Valle
+)
+
+# VerificO la tabella di partenza
+print(dati_flusso_specie)
+
+# Genero il grafico
+g_turnover <- ggplot(dati_flusso_specie, aes(x = Tratto, y = Numero_Specie, fill = Categoria)) +
+  # Creazione delle barre sovrapposte
+  geom_bar(stat = "identity", position = "stack", color = "black", linewidth = 0.5, width = 0.5) +
+  # Inserimento delle etichette numeriche al centro di ogni porzione (usando il valore assoluto)
+  geom_text(aes(label = abs(Numero_Specie)), 
+            position = position_stack(vjust = 0.5), 
+            fontface = "bold", size = 4.5, color = "white") +
+  # Linea netta sullo zero per separare visivamente guadagni e perdite
+  geom_hline(yintercept = 0, color = "gray30", linewidth = 0.8) +
+# NUOVI COLORI OKABE-ITO: Azzurro (Stabili), Giallo (Nuove), Vermiglio (Perse)
+  # Questa combinazione è universalmente sicura per tutte le forme di daltonismo
+  scale_fill_manual(values = c("Specie Nuove (Acquisite)" = "#E69F00",      # Giallo Ambra
+                               "Specie Stabili (Condivise)" = "#56B4E9",     # Azzurro Cielo
+                               "Specie Perse (Estinte locali)" = "#D55E00")) + # Vermiglio / Arancio Scuro
+  # Impostazione simmetrica degli assi e rimozione dei numeri negativi fittizi dall'asse Y
+  scale_y_continuous(labels = function(x) abs(x), limits = c(-5, 45)) +
+  # Stile grafico minimale e pulito
+  theme_classic(base_size = 14) +
+  labs(
+    title = "Dinamica di Turnover e Flusso delle Specie (2013 vs 2025)",
+    subtitle = "Scomposizione della Diversità Beta nei transetti storici dell'Ombrone",
+    x = "Tratto Fluviale",
+    y = "Numero di Specie (Pool Complessivo)",
+    fill = "Dinamica Ecologica"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 14),
+    plot.subtitle = element_text(size = 11, face = "italic", hjust = 0.5, color = "gray30"),
+    axis.title = element_text(face = "bold"),
+    axis.text = element_text(color = "black"),
+    legend.position = "right"
+  )
+
+# Mostra il grafico 
+print(g_turnover)
+
+#salvataggio grafico
+ggsave(filename = "C:/RTesi/grafico_turnover_jaccard_flussi.png", plot     = g_turnover, width    = 8.5, height   = 5.5, dpi      = 300)
+cat("--> SUCCESS: Grafico dei flussi di Jaccard salvato in C:/RTesi\n")
