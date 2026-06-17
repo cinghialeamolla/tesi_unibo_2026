@@ -4,15 +4,15 @@
 
 # ---- packages ----
 {
-  library(tidyverse)
-  library(readxl)
-  library(vegan) # per il calcolo degli indici ecologici
-  library(car) # per il test di Levene (omogeneità delle varianze)
+  library(tidyverse) # Include 'dplyr' (gestione tabelle), 'tidyr' (strutturazione), 'ggplot2' (grafici)
+  library(readxl)    # Caricamento di file Excel (.xlsx)
+  library(vegan)     # Pacchetto standard per indici di diversità, rarificazione e analisi multivariate
+  library(nlme)      # Modelli GLS (Generalized Least Squares) essenziali per gestire le varianze diverse tra gli anni 
+  library(car)       # per il test di Levene (omogeneità delle varianze)
+  library(emmeans)   # Gestione dei contrasti post-hoc (es. test di Tukey) dopo i modelli statistici
+  library(flextable) # Consente di trasformare le tabelle di R in tabelle eleganti per pubblicazioni scientifiche
+  library(officer)   # Permette ad R di scrivere e salvare direttamente file in formato Microsoft Word (.docx)
   library(MASS) # per glm.nb()
-  library(emmeans) # per i confronti post-hoc dei GLM
-  library(flextable)  # per gestire e creare le varie tabelle
-  library(officer)
-  library(ggplot2)  # il mio preferito per i grafici
 }
 
 
