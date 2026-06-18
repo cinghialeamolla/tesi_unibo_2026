@@ -302,8 +302,12 @@ grafico3 <- ggplot(dati_long_specchio, aes(x = Specie, y = Dominanza_Grafico, fi
   geom_bar(stat = "identity") +
   coord_flip() +
   scale_y_continuous(labels = abs) +
-  scale_fill_manual(values = c("T_dx" = "#2c7bb6", "T_sx" = "#d7191c"),
-                    labels = c("T_dx" = "Sponda destra tagliata (destra)", "T_sx" = "Sponda sinistra integra (sinistra)")) +
+  scale_fill_manual(
+    values = c("T_dx" = "#2c7bb6", "T_sx" = "#d7191c"),
+    labels = c("T_dx" = "Sponda destra tagliata", "T_sx" = "Sponda sinistra integra"),
+    breaks = c("T_sx", "T_dx") # <-- AGGIUNGI QUESTA RIGA PER INVERTIRE L'ORDINE NELLA LEGENDA
+  ) +
+
   theme_minimal() +
   labs(title = "Profilo della comunità ornitologica nidificante lungo il fiume Ombrone",
        subtitle = "Confronto della dominanza % a specchio (33 specie) ordinato per la sponda sinistra",
