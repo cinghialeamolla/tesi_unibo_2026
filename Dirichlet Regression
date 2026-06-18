@@ -1,0 +1,77 @@
+# =====================================================================
+# BLOCCO 1: SETUP AMBIENTE, CARICAMENTO DATI E CALCOLO PROPORZIONI
+# =====================================================================
+
+# CARICAMENTO DELLE LIBRERIE ED IMPOSTAZIONE DELLE PREFERENZE
+library(tidyverse)
+library(readxl)
+library(vegan)
+library(car)
+library(flextable)
+library(officer)
+library(broom)
+library(conflicted)
+library(DirichletReg)
+
+# Risoluzione definitiva dei conflitti di funzioni tra pacchetti
+conflict_prefer("select", "dplyr")
+conflict_prefer("filter", "dplyr")
+conflict_prefer("summarize", "dplyr")
+conflict_prefer("summarise", "dplyr")
+
+# SETTAGGIO DIRECTORY DI RIFERIMENTO
+setwd("C:/RTesi")
+
+# CARICAMENTO DEI FOGLI EXCEL ORIGINALI
+specie   <- readxl::read_xlsx("C:/RTesi/dati_ombrone_provvisori.xlsx", sheet = "Contatti_Specie")
+segmenti <- readxl::read_xlsx("C:/RTesi/dati_ombrone_provvisori.xlsx", sheet = "Segmenti")
+
+# PREPARAZIONE DATASET AMBIENTALE STANDARD 2025
+seg_2025_corretto <- segmenti %>%
+  filter(ANNO == 2025) %>%
+  mutate(
+    NDVI = as.numeric(as.character(NDVI)),
+    NOME_TRATTO = factor(NOME_TRATTO, levels = c("Monte", "Tagli", "Valle"))
+  ) %>%
+  filter(!is.na(NDVI)) # Rimuoviamo segmenti privi di dato telerilevato
+
+# RICLASSIFICAZIONE DELLE GILDE E CALCOLO DELLA RICCHEZZA SPECIFICA DI GRUPPO
+dati_gilde_2025 <- specie %>%
+  filter(ID_SEGMENTO %in% seg_2025_corretto$ID_SEGMENTO) %>%
+  mutate(GUILD_PULITA = case_when(
+    str_squish(GUILD) == "riparian - forestry nesters" ~ "Specialisti_Forestali",
+    str_squish(GUILD) == "rural nesters"             ~ "Generalisti_Rurali",
+    TRUE                                             ~ "Altri_Nidificanti"
+  )) %>%
+  group_by(ID_SEGMENTO, GUILD_PULITA) %>%
+  # Contiamo il numero di specie uniche di quella gilda presenti nel singolo segmento
+  summarise(Ricchezza_Gilda = n_distinct(SPECIE), .groups = "drop")
+
+# Trasformazione in formato WIDE per affiancare le tre macro-gilde su colonne distinte
+matrice_gilde_wide <- dati_gilde_2025 %>%
+  pivot_wider(names_from = GUILD_PULITA, values_from = Ricchezza_Gilda, values_fill = 0)
+
+# UNIONE DEI DATASET E TRASFORMAZIONE IN PROPORZIONI COMPOSIZIONALI
+dataset_completo_dirichlet <- seg_2025_corretto %>%
+  distinct(ID_SEGMENTO, .keep_all = TRUE) %>%
+  inner_join(matrice_gilde_wide, by = "ID_SEGMENTO") %>%
+  mutate(
+    Specialisti_Forestali = replace_na(Specialisti_Forestali, 0),
+    Generalisti_Rurali    = replace_na(Generalisti_Rurali, 0),
+    Altri_Nidificanti     = replace_na(Altri_Nidificanti, 0),
+    # Calcoliamo la ricchezza totale cumulativa del segmento (il budget di specie)
+    Ricchezza_Totale      = Specialisti_Forestali + Generalisti_Rurali + Altri_Nidificanti
+  ) %>%
+  filter(Ricchezza_Totale > 0) %>% # Escludiamo segmenti biologicamente vuoti
+  # TRASFORMAZIONE COMPOSIZIONALE: Calcoliamo il tasso relativo (Prop. compresa tra 0 e 1)
+  mutate(
+    Prop_Specialisti = Specialisti_Forestali / Ricchezza_Totale,
+    Prop_Generalisti = Generalisti_Rurali / Ricchezza_Totale,
+    Prop_Altri       = Altri_Nidificanti / Ricchezza_Totale
+  )
+
+# Diagnostica matematica di controllo
+controllo_somma <- dataset_completo_dirichlet %>% 
+  mutate(Somma = Prop_Specialisti + Prop_Generalisti + Prop_Altri) %>% 
+  pull(Somma) %>% unique()
+cat("--> DIAGNOSTICA COMPLETATA: La somma delle proporzioni per riga è pari a:", controllo_somma, "\n")
