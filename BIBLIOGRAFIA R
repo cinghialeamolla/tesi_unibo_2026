@@ -1,0 +1,46 @@
+# 1. Installa e carica knitr (se non lo hai già fatto)
+if(!require(knitr)) install.packages("knitr")
+library(knitr)
+
+# 2. Genera automaticamente il file .bib con TUTTI i pacchetti attivi
+write_bib(x = .packages(), file = "bibliografia_pacchetti.bib")
+
+library(readxl)    # Per il caricamento dei fogli Excel (.xlsx)
+library(vegan)     # Per l'analisi ecologica multivariate e indici comunitari
+library(car)       # Fondamentale per il test di Levene e l'ANOVA di Tipo III (funzione Anova)
+library(MASS)      # Richiesto per la modellazione avanzata di conteggi (funzione glm.nb)
+library(tidyverse) # Include dplyr (manipolazione), tidyr (strutturazione) e ggplot2 (grafica)
+library(emmeans)   # Per estrarre le medie marginali stimate e i contrasti di Tukey
+library(flextable) # Per la formattazione di tabelle in stile scientifico formale
+library(patchwork) # Consente la combinazione e l'impaginazione di grafici multipli
+library(nlme)      # Per i modelli GLS (Generalized Least Squares) con pesi varIdent
+library(ggdist)    # Per la creazione di grafici avanzati sulla distribuzione dei dati
+library(officer)   # Permette ad R di scrivere e salvare direttamente documenti in Word (.docx)
+library(conflicted)# Gestisce in modo sicuro le sovrapposizioni di funzioni tra pacchetti   
+  library(betareg)
+  library(Hmisc)
+  library(broom)
+  library(stringr)
+  library(pairwiseAdonis)  
+library(terra)  
+library(DirichletReg)
+
+print(citation("readxl"), style = "text")
+print(citation("vegan"), style = "text")
+print(citation("car"), style = "text")
+print(citation("MASS"), style = "text")
+print(citation("tidyverse"), style = "text")
+print(citation("emmeans"), style = "text")
+print(citation("flextable"), style = "text")
+print(citation("patchwork"), style = "text")
+print(citation("nlme"), style = "text")
+print(citation("ggdist"), style = "text")
+print(citation("officer"), style = "text")
+print(citation("conflicted"), style = "text")
+print(citation("betareg"), style = "text")
+print(citation("(Hmisc"), style = "text")
+print(citation("broom"), style = "text")
+print(citation("pairwiseAdonis"), style = "text")
+print(citation("terra"), style = "text")
+print(citation("DirichletReg"), style = "text")
+
