@@ -282,31 +282,39 @@ ggsave("grafico_sponde_2025_2.png", width = 8, height = 6, dpi = 300)
 # ====================================================================================
 
 
-# Trovo l'ordine crescente basato solo sulla sponda sinistra (T_sx) dal dataset originale
+# # TrovO l'ordine basato sulla sponda sinistra (T_sx) dal dataset originale
 ordine_specie <- dati_tagli %>%
   arrange(T_sx) %>%
   pull(Specie)
 
-# Trasformo Specie in factor usando questo ordine pulito
-dati_long$Specie <- factor(dati_long$Specie, levels = ordine_specie)
+#  PreparO i dati trasformandoli in "long" e creando la variabile specchio corretta
+dati_long_specchio <- dati_tagli %>%
+  pivot_longer(cols = c(T_dx, T_sx), names_to = "Sponda", values_to = "Dominanza") %>%
+  mutate(
+    # Forza l'ordine delle specie tramite factor
+    Specie = factor(Specie, levels = ordine_specie),
+    # T_sx diventa negativo (sinistra), T_dx resta positivo (destra)
+    Dominanza_Grafico = ifelse(Sponda == "T_sx", -Dominanza, Dominanza)
+  )
 
-# Genero il grafico senza usare reorder() perché l'ordine è già nel factor
-grafico3 <- ggplot(dati_long, aes(x = Specie, y = Dominanza_Grafico, fill = Sponda)) +
+# GenerO il grafico a specchio con la variabile corretta
+grafico3 <- ggplot(dati_long_specchio, aes(x = Specie, y = Dominanza_Grafico, fill = Sponda)) +
   geom_bar(stat = "identity") +
   coord_flip() +
   scale_y_continuous(labels = abs) +
   scale_fill_manual(values = c("T_dx" = "#2c7bb6", "T_sx" = "#d7191c"),
-                    labels = c("T_dx" = "Sponda destra (sinistra)", "T_sx" = "Sponda sinistra (destra)")) +
+                    labels = c("T_dx" = "Sponda destra tagliata (destra)", "T_sx" = "Sponda sinistra integra (sinistra)")) +
   theme_minimal() +
   labs(title = "Profilo della comunità ornitologica nidificante lungo il fiume Ombrone",
-       subtitle = "Confronto della dominanza % a specchio (33 specie) ordinato in modo decrescente (sponda sx)",
+       subtitle = "Confronto della dominanza % a specchio (33 specie) ordinato per la sponda sinistra",
        x = "Specie",
        y = "Dominanza %",
        fill = "Sponde a confronto") +
   theme(axis.text.y = element_text(size = 8), 
         legend.position = "bottom")
 
-
+# Visualizza e salva il grafico
+print(grafico3)
 
 # Visualizzo e salvo il grafico
 grafico3
