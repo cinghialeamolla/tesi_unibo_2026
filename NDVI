@@ -9,32 +9,55 @@ library(tidyverse)
 # Imposto la cartella di riferimento
 setwd("C:/RTesi")
 
-# --- LANDSAT 8 (2013) - Pixel 30m 
+# --- COEFFICIENTI DI CORREZIONE SPETTRALE (SBAF) ---
+sbaf_red <- 1.0510
+sbaf_nir <- 1.0058
+
+# --- LANDSAT 8 (2013) - Pixel 30m (Riferimento Geometrico e Spettrale)
 b4_2013   <- rast("16_giugno_LC08_L2SP_2013_B4.tiff") 
 b5_2013   <- rast("16_giugno_LC08_L2SP_2013_B5.tiff") 
 ndvi_2013 <- (b5_2013 - b4_2013) / (b5_2013 + b4_2013)
 
-# --- SENTINEL-2 STANDARD (2025) - Pixel 10m
-b4_2025       <- rast("24_maggio_2025_Sentinel-2_L2A_B04_(Raw).tiff") 
-b8_2025       <- rast("24_maggio_2025_Sentinel-2_L2A_B08_(Raw).tiff") 
-ndvi_2025_10m <- (b8_2025 - b4_2025) / (b8_2025 + b4_2025)
 
-# --- SENTINEL-2 TAGLI (2025) - Pixel 10m
-b4_T2025 <- rast("Tagli_2025_Sentinel-2_L2A_B04_(Raw).tiff") 
-b8_T2025 <- rast("Tagli_2025_Sentinel-2_L2A_B08_(Raw).tiff") 
+# --- SENTINEL-2 STANDARD (2025) 
+b4_2025_raw <- rast("24_maggio_2025_Sentinel-2_L2A_B04_(Raw).tiff") 
+b8_2025_raw <- rast("24_maggio_2025_Sentinel-2_L2A_B08_(Raw).tiff") 
 
-# Allineamento geometrico preliminare delle bande a 10m  
-b4_T2025_allineata <- resample(b4_T2025, b8_T2025, method = "bilinear")
-ndvi_T2025_10m     <- (b8_T2025 - b4_T2025_allineata) / (b8_T2025 + b4_T2025_allineata)
+# Ricampionamento spaziale e riproiezione iniziale a 30m
+b4_2025_30m_raw <- project(b4_2025_raw, crs(b4_2013), res = 30, method = "bilinear")
+b8_2025_30m     <- project(b8_2025_raw, crs(b4_2013), res = 30, method = "bilinear")
 
-# --- UNIFORMITÀ DELLA RISOLUZIONE SPAZIALE A 30 METRI ----
-# Non uso lo "stampo" del raster del 2013 perchè altrimenti mi sballa l'immagine dei tagli del 2025
-print("Riproiezione e ricampionamento a 30m...")
-ndvi_2025_30m  <- project(ndvi_2025_10m, crs(b4_2013), res = 30, method = "bilinear")
-ndvi_T2025_30m <- project(ndvi_T2025_10m, crs(b4_2013), res = 30, method = "bilinear")
+# Forza la banda B04 ad avere lo stesso identico Extent della B08
+b4_2025_30m     <- resample(b4_2025_30m_raw, b8_2025_30m, method = "bilinear")
+
+# Applicazione della Correzione Spettrale (SBAF) sulle singole bande
+b4_2025_corr <- b4_2025_30m * sbaf_red
+b8_2025_corr <- b8_2025_30m * sbaf_nir
+
+# Calcolo dell'NDVI armonizzato 
+ndvi_2025_30m <- (b8_2025_corr - b4_2025_corr) / (b8_2025_corr + b4_2025_corr)
+
+
+# --- SENTINEL-2 TAGLI (2025)
+b4_T2025_raw <- rast("Tagli_2025_Sentinel-2_L2A_B04_(Raw).tiff") 
+b8_T2025_raw <- rast("Tagli_2025_Sentinel-2_L2A_B08_(Raw).tiff") 
+
+# Ricampionamento spaziale e riproiezione iniziale a 30m
+b4_T2025_30m_raw <- project(b4_T2025_raw, crs(b4_2013), res = 30, method = "bilinear")
+b8_T2025_30m     <- project(b8_T2025_raw, crs(b4_2013), res = 30, method = "bilinear")
+
+# Forza la banda dei Tagli B04 ad avere lo stesso identico Extent della B08
+b4_T2025_30m     <- resample(b4_T2025_30m_raw, b8_T2025_30m, method = "bilinear")
+
+# Applicazione della Correzione Spettrale (SBAF) sulle singole bande
+b4_T2025_corr <- b4_T2025_30m * sbaf_red
+b8_T2025_corr <- b8_T2025_30m * sbaf_nir
+
+# Calcolo dell'NDVI armonizzato
+ndvi_T2025_30m <- (b8_T2025_corr - b4_T2025_corr) / (b8_T2025_corr + b4_T2025_corr)
+
 
 # --- MASCHERAMENTO ACQUA STANDARD (NDVI <= 0.1 -> NA) ---------------
-# Sostituzione dei valori <= 0.1 con NA. Mantengo solo la vera vegetazione.
 ndvi_2013_veg  <- ifel(ndvi_2013 <= 0.1, NA, ndvi_2013)
 ndvi_2025_veg  <- ifel(ndvi_2025_30m <= 0.1, NA, ndvi_2025_30m)
 ndvi_T2025_veg <- ifel(ndvi_T2025_30m <= 0.1, NA, ndvi_T2025_30m)
