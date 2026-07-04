@@ -157,8 +157,8 @@ options(contrasts = c("contr.sum", "contr.poly"))
 setwd("C:/RTesi")
 
 # Carico i fogli Excel specificando i percorsi assoluti
-specie  <- readxl::read_xlsx("C:/RTesi/dati_ombrone_provvisori.xlsx", sheet = "Contatti_Specie")
-segmenti <- readxl::read_xlsx("C:/RTesi/dati_ombrone_provvisori.xlsx", sheet = "Segmenti")
+specie  <- readxl::read_xlsx("C:/RTesi/dati_ombrone_corretti.xlsx", sheet = "Contatti_Specie")
+segmenti <- readxl::read_xlsx("C:/RTesi/dati_ombrone_corretti.xlsx", sheet = "Segmenti")
 
 
 # ---- PREPARAZIONE DEL DATASET AMBIENTALE E BIOLOGICO 2025 ----
@@ -242,7 +242,7 @@ print(shapiro.test(residuals(anova_NDVI)))
 # OUTPUT
 #        Shapiro-Wilk normality test
 # data:  residuals(anova_NDVI)
-# W = 0.98443, p-value = 0.4603
+# W = 0.98634, p-value = 0.5738
 
 # Test di Levene: se p < 0.05 le varianze sono eterogenee (violazione dell'omoschedasticità)
 print(leveneTest(NDVI ~ NOME_TRATTO, data = seg_2025_corretto))
@@ -250,11 +250,11 @@ print(leveneTest(NDVI ~ NOME_TRATTO, data = seg_2025_corretto))
 # OUTPUT
 # Levene's Test for Homogeneity of Variance (center = median)
 #      Df F value   Pr(>F)   
-# group  2  5.6754 0.005068 **
-#      75                    
+# group  2  6.0936 0.00353 **
+#      75                     
 
 # ----  MODELLAZIONE STATISTICA AVANZATA (GLS PONDERATO) ----
-# Poiché Levene è risultato significativo (p = 0.005), applico il modello GLS.
+# Poiché Levene è risultato significativo (p = 0.00353), applico il modello GLS.
 # Uso 'weights = varIdent' per consentire ad ogni tratto di avere la propria varianza, 
 # stabilizzando i residui e rendendo i p-value matematicamente inattaccabili.
 gls_ndvi <- gls(NDVI ~ NOME_TRATTO, 
@@ -266,9 +266,10 @@ print(car::Anova(gls_ndvi, type = "III"))
 
 # output
 # Response: NDVI
-#            Df   Chisq Pr(>Chisq)    
-# (Intercept)  1 6893.38  < 2.2e-16 ***
-# NOME_TRATTO  2  143.47  < 2.2e-16 ***
+#            Df   Chisq Pr(>Chisq)     
+# (Intercept)  1 5797.11  < 2.2e-16 ***
+# NOME_TRATTO  2  109.87  < 2.2e-16 ***
+
 
 
 # ---- CONTRASTI POST-HOC (TEST DI TUKEY) ED ESPORTAZIONE TABELLA  ----
@@ -279,9 +280,10 @@ print(confronti_posthoc$contrasts)
 
 # OUTPUT
 # contrast      estimate     SE   df t.ratio p.value
-# Monte - Tagli  -0.0706 0.0123 47.2  -5.719 <0.0001
-# Monte - Valle   0.1261 0.0158 43.5   7.962 <0.0001
-# Tagli - Valle   0.1966 0.0164 46.5  11.956 <0.0001
+# Monte - Tagli  -0.0752 0.0127 44.6  -5.945 <0.0001
+# Monte - Valle   0.1116 0.0167 39.9   6.680 <0.0001
+# Tagli - Valle   0.1868 0.0180 46.6  10.384 <0.0001
+
 
 # =====================================================================
 #  -------------------- CREAZIONE TABELLA
