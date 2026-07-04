@@ -13,8 +13,8 @@ library(nlme)      # Libreria per i modelli GLS (Generalized Least Squares) con 
 setwd("C:/RTesi")
 
 # Carico i fogli Excel specificando i percorsi espliciti per prevenire conflitti di funzioni
-specie  <- readxl::read_xlsx("C:/RTesi/dati_ombrone_provvisori.xlsx", sheet = "Contatti_Specie")
-segmenti <- readxl::read_xlsx("C:/RTesi/dati_ombrone_provvisori.xlsx", sheet = "Segmenti")
+specie  <- readxl::read_xlsx("C:/RTesi/dati_ombrone_corretti.xlsx", sheet = "Contatti_Specie")
+segmenti <- readxl::read_xlsx("C:/RTesi/dati_ombrone_corretti.xlsx", sheet = "Segmenti")
 
 
 # PREPARAZIONE DEL DATASET 
@@ -36,14 +36,14 @@ dati_confronto <- segmenti %>%
 # Genero la TABELLA WORD con le metriche di base (Medie e Deviazioni Standard reali dei campioni)
 # ================================================================================================
 
-# Imposto il dataframe
-tabella_descrittiva_dati <- data.frame(
-  ANNO        = c("2013", "2013", "2025", "2025"),
-  NOME_TRATTO = c("Monte", "Valle", "Monte", "Valle"),
-  N_Segmenti  = c(28, 22, 25, 28),
-  NDVI_Medio  = c(0.264, 0.261, 0.526, 0.400),
-  Dev_Std     = c(0.0300, 0.0231, 0.0407, 0.0719)
-)
+tabella_descrittiva_dati <- dati_confronto %>%
+  group_by(ANNO, NOME_TRATTO) %>%
+  summarise(
+    NDVI_Medio = mean(NDVI, na.rm = TRUE),
+    Dev_Std    = sd(NDVI, na.rm = TRUE),
+    N_Segmenti = n(),
+    .groups    = "drop"
+  ) 
 
 # Impagino la tabella descrittiva per Word applicando le convenzioni editoriali scientifiche
 ft_descrittiva <- flextable(tabella_descrittiva_dati) %>%
@@ -81,10 +81,11 @@ print(tabella_descrittiva_dati)
 # OUTPUT
 # ANNO  NOME_TRATTO N_Segmenti NDVI_Medio Dev_Std
 # <fct> <fct>             <int>      <dbl>   <dbl>
-# 2013  Monte               28      0.264  0.0300
-# 2013  Valle               22      0.261  0.0231
-# 2025  Monte               25      0.526  0.0407
-# 2025  Valle               28      0.400  0.0719
+# 2013  Monte            0.264  0.0302         28
+# 2013  Valle            0.261  0.0231         22
+# 2025  Monte            0.508  0.0380         25
+# 2025  Valle            0.396  0.0787         28
+
 
 
 # =====================================================================
@@ -112,12 +113,11 @@ print(anova_risultati)
 
 # OUTPUT
 # Response: NDVI
-#                  Df     Chisq Pr(>Chisq)    
-# (Intercept)       1 2133.3539  < 2.2e-16 ***
-# ANNO              1  699.0629  < 2.2e-16 ***
-# NOME_TRATTO       1    0.0844     0.7714    
-# ANNO:NOME_TRATTO  1   49.8862  1.629e-12 ***
-# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+#                                  Df    Chisq Pr(>Chisq)    
+# (Intercept)       1 6075.835  < 2.2e-16 ***
+# ANNO              1  427.966  < 2.2e-16 ***
+# NOME_TRATTO       1   38.537  5.371e-10 ***
+# ANNO:NOME_TRATTO  1   35.627  2.390e-09 ***
 
 # ---- ESTRAZIONE DEI CONTRASTI TEMPORALI POST-HOC (TEST DI TUKEY) ----
 print("--- CONTRASTI POST-HOC TEMPORALI (2013 vs 2025) ---")
@@ -135,29 +135,26 @@ print(em_risultati$contrasts)
 # OUTPUT
 # NOME_TRATTO = Monte:
 #  contrast            estimate      SE   df t.ratio p.value
-#  ANNO2013 - ANNO2025  -0.263 0.00994 44.0 -26.440 <0.0001
+#  ANNO2013 - ANNO2025   -0.244 0.0095 45.7 -25.708 <0.0001
 
 # NOME_TRATTO = Valle:
-#  contrast            estimate      SE   df t.ratio p.value
-#  ANNO2013 - ANNO2025  -0.139 0.01450 33.9  -9.613 <0.0001
-# Degrees-of-freedom method: satterthwaite 
-
+# contrast            estimate     SE   df t.ratio p.value
+# ANNO2013 - ANNO2025   -0.135 0.0157 32.8  -8.606 <0.0001
 
 # =====================================================================
-#           Creazione Tabella informativa GLS
+#           Creazione Tabella informativa GLS (Valori Corretti)
 # ======================================================================
 
-# Definizione della struttura dati verticale estratta dalla console
-# Inserisco i dati reali dei campioni e le stime ricavate dal modello GLS
+# Definizione della struttura dati verticale estratta dalla console con i NUOVI VALORI REALI
 dati_verticali <- data.frame(
   Anno       = c("2013", "2013", "2025", "2025"),
   Tratto     = c("Monte", "Valle", "Monte", "Valle"),
   N_Seg      = c(28, 22, 25, 28),
-  NDVI_Medio = c(0.264, 0.261, 0.526, 0.400),
-  Dev_Std    = c(0.030, 0.023, 0.041, 0.072),
-  Variazione = c("-", "-", "+0.263", "+0.139"),
-  Err_Std    = c("-", "-", "0.010", "0.015"),
-  t_ratio    = c("-", "-", "-26.44", "-9.61"),
+  NDVI_Medio = c(0.264, 0.261, 0.508, 0.396), # Valori aggiornati da console
+  Dev_Std    = c(0.030, 0.023, 0.038, 0.079), # Valori aggiornati da console
+  Variazione = c("-", "-", "+0.244", "+0.135"), # Stime esatte dai contrasti post-hoc
+  Err_Std    = c("-", "-", "0.0095", "0.0157"), # Errore Standard esatto (SE)
+  t_ratio    = c("-", "-", "-25.708", "-8.606"), # t-ratio esatto da output GLS
   p_val      = c("-", "-", "<0.0001", "<0.0001")
 )
 
@@ -203,7 +200,6 @@ doc_compatco <- read_docx() %>%
 # Esportazione fisica sul disco
 print(doc_compatco, target = "C:/RTesi/Tabella_Compatta_GLS_NDVI.docx")
 cat("--> SUCCESS: Tabella Word compatta salvata con successo in C:/RTesi\n")
-
 # =====================================================================
 # ---- GRAFICO DI INTERAZIONE NDVI (2013 vs 2025) ----
 # =====================================================================
