@@ -1,6 +1,6 @@
 
 # =====================================================================
-# ESTRAZIONE NDVI SU BUFFER DEI SEGMENTI REALI - OTTIMIZZATO
+# ESTRAZIONE NDVI SU BUFFER DEI SEGMENTI REALI
 # =====================================================================
 
 library(terra)   
