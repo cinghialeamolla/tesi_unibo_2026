@@ -171,35 +171,52 @@ dati2025 <- read_excel("C:/Runibo/dati_ornitologia_tratti_2013_2025_specchio.xls
 dati_grafico <- dati2025 %>%
   filter(Anno %in% c(2013, 2025)) %>%
   mutate(
-    Anno = as.character(Anno),
+    # Ordina i livelli della legenda in senso cronologico (2013 a sinistra, 2025 a destra)
+    Anno = factor(as.character(Anno), levels = c("2013", "2025")),
     # Il 2013 diventa negativo (sinistra), il 2025 resta positivo (destra)
     Abbondanza_Grafico = ifelse(Anno == "2013", -Abbondanza, Abbondanza)
   )
 
 # Genero il Grafico a Specchio
-# NOTA: reorder(Specie, Abbondanza, FUN = sum) ordina le specie in base alla somma delle abbondanze dei due anni
 grafico_specchio <- ggplot(dati_grafico, aes(x = reorder(Specie, Abbondanza, FUN = sum), y = Abbondanza_Grafico, fill = Anno)) +
-  geom_bar(stat = "identity") +
-
-coord_flip() + # Ruota il grafico in orizzontale
+  geom_bar(stat = "identity", width = 0.75) +
+  geom_hline(yintercept = 0, color = "black", linewidth = 0.4) +
+  coord_flip() + # Ruota il grafico in orizzontale
   scale_y_continuous(labels = abs) + # Mostra i valori di entrambi i lati come positivi
-  scale_fill_manual(values = c("2025" = "#2c7bb6", "2013" = "#d7191c"),
-                    labels = c("2025" = "Anno 2025", "2013" = "Anno 2013")) +
-  theme_minimal() +
-  labs(title = "Profilo della comunità ornitologica nidificante lungo il fiume Ombrone",
-       subtitle = "Confronto della dominanza % tra il 2013 (sinistra) e il 2025 (destra) in ordine decrescente",
-       x = "Specie",
-       y = "Dominanza %",
-       fill = "Anni a confronto") +
-  theme(axis.text.y = element_text(size = 8), 
-        legend.position = "bottom")
+  
+  # Palette Okabe-Ito adatta ai daltonici (Arancione = 2013, Blu = 2025)
+  scale_fill_manual(
+    values = c("2013" = "#E69F00", "2025" = "#0072B2"),
+    labels = c("2013" = "2013", "2025" = "2025")
+  ) +
+  
+  theme_minimal(base_size = 12) +
+  labs(
+    x = "Bird species",
+    y = "Relative dominance (%)",
+    fill = "Survey year"
+  ) +
+  theme(
+    axis.text.y = element_text(size = 8.5, face = "italic", color = "black"),
+    axis.text.x = element_text(color = "black"),
+    axis.title = element_text(color = "black"),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold")
+  )
 
-# Visualizzo e salvo il grafico
+# Visualizzo il grafico
 print(grafico_specchio)
-ggsave("grafico_specchio_anni_ordinato.png", width = 8, height = 6, dpi = 300)
 
-
-
+# Esportazione consigliata per un grafico verticale con molte specie
+ggsave(
+  filename = "C:/Runibo/Supplementary_Figure_S1.png",
+  plot = grafico_specchio,
+  width = 8.5,
+  height = 10,
+  dpi = 300,
+  bg = "white"
+)
 
 
 # ========================================================================================
